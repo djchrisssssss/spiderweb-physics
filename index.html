@@ -626,7 +626,7 @@
       }
       sp.constraints.push(new DistanceConstraint(leg, best, 1, 0));
     }
-    thorax.x += gx * 0.5; thorax.y += gy * 0.5;                // small body assist for smooth progress
+    thorax.x += gx * 0.2; thorax.y += gy * 0.2;                // small body assist (reduced) for smooth progress
   }
 
   function updateSpider() {
