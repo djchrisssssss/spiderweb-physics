@@ -39,6 +39,7 @@
        <span class="k">拖曳</span>蛛絲或蜘蛛 &middot; 按 <span class="k">R</span> 重新結網 &middot; 蜘蛛會自己爬</p>
   </div>
   <div id="controls">
+    <button id="addBug">🐛 放昆蟲</button>
     <button id="regen">重新結網 (R)</button>
     <button id="toggleSpider">蜘蛛開關</button>
   </div>
@@ -382,6 +383,7 @@
     styleWeb(web);
 
     drag = null;
+    bugs = [];
     if (spiderOn) {
       var spider = sim.spider(new Vec2(W / 2 + (Math.random() - 0.5) * 220, -200), 0.75);  // spider size (0.5 -> 0.75, +50%)
       styleSpider(spider);
@@ -471,19 +473,126 @@
     ctx.restore();
   }
 
+  /* ---------------- prey insects (Phase 1: arrive, stick, struggle) ---------------- */
+  var bugs = [];
+  var BUG_TYPES = ["fly", "moth", "ant", "roach"];
+  var BUG_SPEC = {
+    fly:   { speed: 6.0, wobble: 3.4 },
+    moth:  { speed: 3.0, wobble: 1.3 },
+    ant:   { speed: 2.6, wobble: 0.4 },
+    roach: { speed: 4.6, wobble: 1.5 }
+  };
+
+  function spawnBug(type) {
+    if (!sim) return;
+    type = type || BUG_TYPES[Math.floor(Math.random() * BUG_TYPES.length)];
+    var W = sim.width, H = sim.height, edge = Math.floor(Math.random() * 4), x, y;
+    if (edge === 0) { x = Math.random() * W; y = -30; }
+    else if (edge === 1) { x = W + 30; y = Math.random() * H; }
+    else if (edge === 2) { x = Math.random() * W; y = H + 30; }
+    else { x = -30; y = Math.random() * H; }
+    var ang = Math.random() * 6.283, rad = (0.25 + Math.random() * 0.65) * Math.min(W, H) * 0.3;
+    var spec = BUG_SPEC[type];
+    bugs.push({
+      type: type, x: x, y: y,
+      tx: W / 2 + Math.cos(ang) * rad, ty: H / 2 + Math.sin(ang) * rad,
+      speed: spec.speed, wobble: spec.wobble, ang: 0, phase: Math.random() * 6.283,
+      t: 0, state: "arriving", anchor: null, struggle: 1, wrap: 0
+    });
+  }
+
+  function nearestWebParticle(x, y) {
+    var ps = sim.composites[0].particles, best = null, bd = Infinity;
+    for (var i = 0; i < ps.length; i++) {
+      var dx = ps[i].pos.x - x, dy = ps[i].pos.y - y, d = dx * dx + dy * dy;
+      if (d < bd) { bd = d; best = ps[i]; }
+    }
+    return { p: best, d2: bd };
+  }
+
+  function updateBugs() {
+    for (var i = bugs.length - 1; i >= 0; i--) {
+      var b = bugs[i]; b.t++;
+      if (b.state === "arriving") {
+        var dx = b.tx - b.x, dy = b.ty - b.y, d = Math.sqrt(dx * dx + dy * dy) || 1;
+        b.ang = Math.atan2(dy, dx);
+        var nx = dx / d, ny = dy / d, perp = Math.sin(b.t * 0.3 + b.phase) * b.wobble;
+        b.x += nx * b.speed - ny * perp + (Math.random() - 0.5) * b.wobble;
+        b.y += ny * b.speed + nx * perp + (Math.random() - 0.5) * b.wobble;
+        var nr = nearestWebParticle(b.x, b.y);
+        if (nr.p && (nr.d2 < 16 * 16 || d < 6)) { b.state = "stuck"; b.anchor = nr.p; b.struggle = 1; }
+      } else if (b.state === "stuck") {
+        if (!b.anchor) { bugs.splice(i, 1); continue; }
+        b.x = b.anchor.pos.x; b.y = b.anchor.pos.y;   // ride the web point
+        if (b.struggle > 0.05) {                      // struggle shakes the web, decaying
+          var amp = b.struggle * 1.8;
+          b.anchor.pos.x += (Math.random() - 0.5) * amp;
+          b.anchor.pos.y += (Math.random() - 0.5) * amp;
+          b.struggle *= 0.992;
+        }
+      }
+    }
+  }
+
+  function drawBugShape(ctx, type) {
+    if (type === "fly") {
+      ctx.fillStyle = "rgba(205,212,224,0.45)";
+      ctx.beginPath(); ctx.ellipse(-2, -3.5, 6, 3, -0.5, 0, 6.283); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(-2, 3.5, 6, 3, 0.5, 0, 6.283); ctx.fill();
+      ctx.fillStyle = "#202329";
+      ctx.beginPath(); ctx.ellipse(0, 0, 5.5, 2.6, 0, 0, 6.283); ctx.fill();
+      ctx.fillStyle = "#0c0d10"; ctx.beginPath(); ctx.arc(4.5, 0, 2, 0, 6.283); ctx.fill();
+    } else if (type === "moth") {
+      ctx.fillStyle = "rgba(150,140,118,0.85)";
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-12, -11); ctx.lineTo(-13, 0); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-12, 11); ctx.lineTo(-13, 0); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "rgba(176,166,142,0.9)";
+      ctx.beginPath(); ctx.moveTo(2, 0); ctx.lineTo(10, -8); ctx.lineTo(11, 0); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(2, 0); ctx.lineTo(10, 8); ctx.lineTo(11, 0); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "#4a4334"; ctx.beginPath(); ctx.ellipse(-2, 0, 5, 2.6, 0, 0, 6.283); ctx.fill();
+    } else if (type === "ant") {
+      ctx.strokeStyle = "#3a2520"; ctx.lineWidth = 0.8;
+      for (var k = -1; k <= 1; k++) { ctx.beginPath(); ctx.moveTo(-2, 0); ctx.lineTo(-2 + k * 3, (k === 0 ? 5 : 4) * (Math.random() > .5 ? 1 : 1)); ctx.stroke(); }
+      ctx.fillStyle = "#5a1f18";
+      ctx.beginPath(); ctx.arc(-6, 0, 4, 0, 6.283); ctx.fill();   // abdomen
+      ctx.beginPath(); ctx.arc(0, 0, 2.6, 0, 6.283); ctx.fill();  // thorax
+      ctx.beginPath(); ctx.arc(5, 0, 3, 0, 6.283); ctx.fill();    // head
+    } else { // roach
+      ctx.strokeStyle = "#6b4a2a"; ctx.lineWidth = 0.9;
+      ctx.beginPath(); ctx.moveTo(5, -1); ctx.lineTo(12, -5); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(5, 1); ctx.lineTo(12, 5); ctx.stroke();
+      ctx.fillStyle = "#5b3d22"; ctx.beginPath(); ctx.ellipse(0, 0, 8, 4.5, 0, 0, 6.283); ctx.fill();
+      ctx.fillStyle = "#3f2a17"; ctx.beginPath(); ctx.ellipse(4, 0, 3.5, 3.2, 0, 0, 6.283); ctx.fill();
+    }
+  }
+
+  function drawBugs(ctx) {
+    for (var i = 0; i < bugs.length; i++) {
+      var b = bugs[i];
+      ctx.save();
+      ctx.translate(b.x, b.y);
+      ctx.rotate(b.ang);
+      drawBugShape(ctx, b.type);
+      ctx.restore();
+    }
+  }
+
   var legIndex = 0;
   function loop() {
     // crawl only once on the web (not while descending on the silk)
     if (spiderOn && sim.composites[1] && (!drag || drag.phase !== "descend") && Math.floor(Math.random() * 8) === 0)
       sim.crawl(((legIndex++) * 3) % 8);
+    updateBugs();    // insects fly in / struggle (struggle perturbs the web)
     sim.frame(30);   // physics first
     updateDrag();    // then the silk constraint / phase logic (final positional step)
     sim.draw();
     drawDrag();      // dragline drawn on top of the web
+    drawBugs(sim.ctx);
     requestAnimFrame(loop);
   }
 
   // controls
+  document.getElementById("addBug").addEventListener("click", function () { spawnBug(); });
   document.getElementById("regen").addEventListener("click", build);
   document.getElementById("toggleSpider").addEventListener("click", function () {
     spiderOn = !spiderOn; build();
