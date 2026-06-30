@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Spiderweb — gregkepler algorithm × verlet-js physics</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #111118; }
+  #stage {
+    display: block;
+    background: radial-gradient(circle at 50% 42%, #1c1c26 0%, #14141c 55%, #0d0d12 100%);
+    cursor: grab;
+  }
+  #stage:active { cursor: grabbing; }
+  #hud {
+    position: fixed; top: 16px; left: 18px;
+    font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    color: #c9cdd6; pointer-events: none; user-select: none;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.6);
+  }
+  #hud h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: .2px; color: #e7eaf0; }
+  #hud p { margin: 4px 0 0; font-size: 12px; color: #9298a4; line-height: 1.5; }
+  #hud .k { color: #c9cdd6; font-weight: 600; }
+  #controls { position: fixed; top: 16px; right: 18px; display: flex; gap: 8px; }
+  #controls button {
+    font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    font-size: 12px; color: #d4d8e0; background: rgba(40,42,52,.85);
+    border: 1px solid rgba(120,126,140,.35); border-radius: 6px;
+    padding: 7px 12px; cursor: pointer; backdrop-filter: blur(4px);
+  }
+  #controls button:hover { background: rgba(58,60,72,.95); color: #fff; }
+</style>
+</head>
+<body>
+  <canvas id="stage"></canvas>
+  <div id="hud">
+    <h1>Spiderweb</h1>
+    <p>gregkepler 生成演算法 &times; verlet-js 物理<br>
+       <span class="k">拖曳</span>蛛絲或蜘蛛 &middot; 按 <span class="k">R</span> 重新結網 &middot; 蜘蛛會自己爬</p>
+  </div>
+  <div id="controls">
+    <button id="regen">重新結網 (R)</button>
+    <button id="toggleSpider">蜘蛛開關</button>
+  </div>
+
+  <script src="verlet-1.0.0.js"></script>
+  <script>
+  /* ------------------------------------------------------------------ *
+   *  organicWeb — port of Greg Kepler's spider-webs-js generation
+   *  algorithm onto the verlet-js physics engine (Sub Protocol, MIT).
+   *
+   *  Original structural logic (anchors -> suspension frame -> rays ->
+   *  bars with organic gaps / Y-strands / reinforcement) comes from
+   *  spider-webs-js/spiderwebs/web.js. Here it is rebuilt with verlet-js
+   *  Particles + DistanceConstraints so the web is fully draggable.
+   * ------------------------------------------------------------------ */
+  VerletJS.prototype.organicWeb = function(origin, opts) {
+    opts = opts || {};
+    var pointNum = opts.pointNum;          // main suspension anchors
+    var radiusBase = opts.radiusBase;      // base anchor radius
+    var raysPer = opts.raysPerSegment;     // rays between two anchors
+    var levels = opts.levels;              // bar levels per ray (barPointAmt)
+
+    var stiffSusp  = 0.99;   // anchor -> screen edge (taut, reinforced)
+    var stiffFrame = 0.96;   // outer perimeter ring (taut)
+    var stiffRay   = 0.93;   // radial threads (stiff dragline)
+    var stiffBar   = 0.55;   // capture-spiral bars (kept elastic, as in nature)
+
+    var W = this.width, H = this.height, inset = 10;
+    var cx = origin.x, cy = origin.y;
+    var composite = new this.Composite();
+
+    function P(x, y) { var p = new Particle(new Vec2(x, y)); composite.particles.push(p); return p; }
+    function link(a, b, stiff, kind) {
+      var c = new DistanceConstraint(a, b, stiff);
+      c.kind = kind;
+      composite.constraints.push(c);
+      return c;
+    }
+    // intersection of ray (from center along ang) with the inset canvas rect
+    function edgePoint(ang) {
+      var dx = Math.cos(ang), dy = Math.sin(ang);
+      var tx = dx > 0 ? (W - inset - cx) / dx : (dx < 0 ? (inset - cx) / dx : Infinity);
+      var ty = dy > 0 ? (H - inset - cy) / dy : (dy < 0 ? (inset - cy) / dy : Infinity);
+      var t = Math.min(tx, ty);
+      return { x: cx + dx * t, y: cy + dy * t };
+    }
+
+    // 1. anchor directions, each with a randomized radius (organic, not a circle)
+    var anchors = [];
+    for (var i = 0; i < pointNum; i++) {
+      var ang = i * (2 * Math.PI / pointNum) + (Math.random() - 0.5) * 0.28;
+      var r = radiusBase * (0.7 + Math.random() * 0.6);
+      anchors.push({ ang: ang, r: r });
+    }
+
+    // 2. ray seed points: interpolate raysPer rays along each anchor->anchor arc
+    var rays = [];
+    for (var a = 0; a < pointNum; a++) {
+      var A = anchors[a], B = anchors[(a + 1) % pointNum];
+      var angA = A.ang, angB = B.ang;
+      if (angB <= angA) angB += 2 * Math.PI;
+      for (var s = 0; s < raysPer; s++) {
+        var t = s / raysPer;
+        var ang = angA + (angB - angA) * t;
+        var rad = (A.r + (B.r - A.r) * t) * (0.9 + Math.random() * 0.25);
+        rays.push({ ang: ang, rad: rad, isAnchor: (s === 0) });
+      }
+    }
+    var rayCount = rays.length;
+
+    // 3. build each ray: outer perimeter point + inner points toward the hub
+    for (var i = 0; i < rayCount; i++) {
+      var R = rays[i];
+      R.pts = [];
+      var outer = P(cx + Math.cos(R.ang) * R.rad, cy + Math.sin(R.ang) * R.rad);
+      R.outer = outer;
+      R.pts.push(outer);
+      for (var k = 1; k <= levels; k++) {
+        var f = k / (levels + 1);
+        var radK = R.rad * (1 - f) * (0.9 + Math.random() * 0.18);
+        var pt = P(cx + Math.cos(R.ang) * radK, cy + Math.sin(R.ang) * radK);
+        R.pts.push(pt);
+        link(R.pts[R.pts.length - 2], pt, stiffRay, "ray");
+      }
+    }
+
+    // shared hub at the web center
+    var hub = P(cx, cy);
+    composite.hub = hub;
+    for (var i = 0; i < rayCount; i++)
+      link(rays[i].pts[rays[i].pts.length - 1], hub, stiffRay, "ray");
+
+    // hub / strengthening spiral: the innermost few tight, non-sticky turns the spider
+    // reinforces around the centre (the "strengthening zone"). Several rings, not one.
+    var strengthenRings = 3;
+    for (var s = 0; s < strengthenRings; s++) {
+      var kk = levels - s;
+      if (kk < 1) break;
+      for (var i = 0; i < rayCount; i++)
+        link(rays[i].pts[kk], rays[(i + 1) % rayCount].pts[kk], 0.96, "hub");
+    }
+
+    // 4. outer perimeter ring (irregular polygon frame)
+    for (var i = 0; i < rayCount; i++)
+      link(rays[i].outer, rays[(i + 1) % rayCount].outer, stiffFrame, "frame");
+
+    // 5. suspension lines: anchor rays shoot to the screen edge and pin there
+    for (var i = 0; i < rayCount; i++) {
+      if (!rays[i].isAnchor) continue;
+      var e = edgePoint(rays[i].ang);
+      var ep = P(e.x, e.y);
+      link(rays[i].outer, ep, stiffSusp, "susp");
+      composite.pin(composite.particles.indexOf(ep));
+    }
+
+    // 6. capture-spiral bars between adjacent rays, with organic variation.
+    // Leave the innermost rings bar-free: real orb webs keep a sticky-free "free zone"
+    // around the hub where only radii run and the spider rests. (pts[levels] = hub side)
+    var freeZone = 3;            // innermost rings with no capture spiral (matches strengthening zone)
+    for (var k = 1; k <= levels - freeZone; k++) {
+      for (var i = 0; i < rayCount; i++) {
+        var R = rays[i], N = rays[(i + 1) % rayCount];
+        var chance = Math.floor(Math.random() * 20);
+        if (chance === 0 || chance === 18 || chance === 19) continue;   // organic gap
+        var pA = R.pts[k], pB = N.pts[k];
+        if (chance === 1) {
+          // Y-shaped strand
+          var mid = P((pA.pos.x + pB.pos.x) / 2, (pA.pos.y + pB.pos.y) / 2);
+          link(pA, mid, stiffBar, "bar");
+          link(mid, N.pts[k], stiffBar, "bar");
+          link(mid, N.pts[Math.min(k + 1, levels)], stiffBar, "bar");
+        } else {
+          link(pA, pB, stiffBar, "bar");
+          if (chance === 2)   // extra reinforcement to a neighbouring level
+            link(pA, N.pts[Math.max(1, k - 1)], stiffBar, "bar");
+        }
+      }
+    }
+
+    this.composites.push(composite);
+    return composite;
+  };
+
+  /* ------------------------------------------------------------------ *
+   *  spider + crawl — adapted verbatim from verlet-js spiderweb.html
+   *  (Sub Protocol, MIT). Only draw colours are changed for dark bg.
+   * ------------------------------------------------------------------ */
+  VerletJS.prototype.spider = function(origin, scale) {
+    var i;
+    scale = scale || 1;
+    var legSeg = 0.99, joint1 = 1, joint2 = 0.4, joint3 = 0.9, bodyStiffness = 1, bodyJointStiffness = 1;
+    var composite = new this.Composite();
+    composite.legs = [];
+    composite.scale = scale;
+
+    composite.thorax = new Particle(origin);
+    composite.head = new Particle(origin.add(new Vec2(0, -5 * scale)));
+    composite.abdomen = new Particle(origin.add(new Vec2(0, 10 * scale)));
+    composite.particles.push(composite.thorax, composite.head, composite.abdomen);
+    composite.constraints.push(new DistanceConstraint(composite.head, composite.thorax, bodyStiffness));
+    composite.constraints.push(new DistanceConstraint(composite.abdomen, composite.thorax, bodyStiffness));
+    composite.constraints.push(new AngleConstraint(composite.abdomen, composite.thorax, composite.head, 0.4));
+
+    for (i = 0; i < 4; ++i) {
+      composite.particles.push(new Particle(composite.particles[0].pos.add(new Vec2(3 * scale, (i - 1.5) * 3 * scale))));
+      composite.particles.push(new Particle(composite.particles[0].pos.add(new Vec2(-3 * scale, (i - 1.5) * 3 * scale))));
+      var len = composite.particles.length;
+      composite.constraints.push(new DistanceConstraint(composite.particles[len - 2], composite.thorax, legSeg));
+      composite.constraints.push(new DistanceConstraint(composite.particles[len - 1], composite.thorax, legSeg));
+
+      var lenCoef = 1; if (i == 1 || i == 2) lenCoef = 0.7; else if (i == 3) lenCoef = 0.9;
+      composite.particles.push(new Particle(composite.particles[len - 2].pos.add((new Vec2(20, (i - 1.5) * 30)).normal().mutableScale(20 * lenCoef * scale))));
+      composite.particles.push(new Particle(composite.particles[len - 1].pos.add((new Vec2(-20, (i - 1.5) * 30)).normal().mutableScale(20 * lenCoef * scale))));
+      len = composite.particles.length;
+      composite.constraints.push(new DistanceConstraint(composite.particles[len - 4], composite.particles[len - 2], legSeg));
+      composite.constraints.push(new DistanceConstraint(composite.particles[len - 3], composite.particles[len - 1], legSeg));
+
+      composite.particles.push(new Particle(composite.particles[len - 2].pos.add((new Vec2(20, (i - 1.5) * 50)).normal().mutableScale(20 * lenCoef * scale))));
+      composite.particles.push(new Particle(composite.particles[len - 1].pos.add((new Vec2(-20, (i - 1.5) * 50)).normal().mutableScale(20 * lenCoef * scale))));
+      len = composite.particles.length;
+      composite.constraints.push(new DistanceConstraint(composite.particles[len - 4], composite.particles[len - 2], legSeg));
+      composite.constraints.push(new DistanceConstraint(composite.particles[len - 3], composite.particles[len - 1], legSeg));
+
+      var rightFoot = new Particle(composite.particles[len - 2].pos.add((new Vec2(20, (i - 1.5) * 100)).normal().mutableScale(12 * lenCoef * scale)));
+      var leftFoot = new Particle(composite.particles[len - 1].pos.add((new Vec2(-20, (i - 1.5) * 100)).normal().mutableScale(12 * lenCoef * scale)));
+      composite.particles.push(rightFoot, leftFoot);
+      composite.legs.push(rightFoot, leftFoot);
+      len = composite.particles.length;
+      composite.constraints.push(new DistanceConstraint(composite.particles[len - 4], composite.particles[len - 2], legSeg));
+      composite.constraints.push(new DistanceConstraint(composite.particles[len - 3], composite.particles[len - 1], legSeg));
+      composite.constraints.push(new AngleConstraint(composite.particles[len - 6], composite.particles[len - 4], composite.particles[len - 2], joint3));
+      composite.constraints.push(new AngleConstraint(composite.particles[len - 6 + 1], composite.particles[len - 4 + 1], composite.particles[len - 2 + 1], joint3));
+      composite.constraints.push(new AngleConstraint(composite.particles[len - 8], composite.particles[len - 6], composite.particles[len - 4], joint2));
+      composite.constraints.push(new AngleConstraint(composite.particles[len - 8 + 1], composite.particles[len - 6 + 1], composite.particles[len - 4 + 1], joint2));
+      composite.constraints.push(new AngleConstraint(composite.particles[0], composite.particles[len - 8], composite.particles[len - 6], joint1));
+      composite.constraints.push(new AngleConstraint(composite.particles[0], composite.particles[len - 8 + 1], composite.particles[len - 6 + 1], joint1));
+      composite.constraints.push(new AngleConstraint(composite.particles[1], composite.particles[0], composite.particles[len - 8], bodyJointStiffness));
+      composite.constraints.push(new AngleConstraint(composite.particles[1], composite.particles[0], composite.particles[len - 8 + 1], bodyJointStiffness));
+    }
+    this.composites.push(composite);
+    return composite;
+  };
+
+  function shuffle(o) { for (var j, x, i = o.length; i; j = Math.floor(Math.random() * i), x = o[--i], o[i] = o[j], o[j] = x); return o; }
+
+  VerletJS.prototype.crawl = function(leg) {
+    var web = this.composites[0], spider = this.composites[1];
+    if (!spider) return;
+    var sc = spider.scale || 1;
+    var stepRadius = 110 * sc, minStepRadius = 40 * sc;
+    var theta = spider.particles[0].pos.angle2(spider.particles[0].pos.add(new Vec2(1, 0)), spider.particles[1].pos);
+    var b1 = new Vec2(Math.cos(theta), Math.sin(theta));
+    var b2 = new Vec2(Math.cos(theta + Math.PI / 2), Math.sin(theta + Math.PI / 2));
+    var flag1 = leg < 4 ? 1 : -1, flag2 = leg % 2 == 0 ? 1 : 0;
+    var paths = [], i;
+    for (i in web.particles) {
+      if (web.particles[i].pos.sub(spider.particles[0].pos).dot(b1) * flag1 >= 0
+        && web.particles[i].pos.sub(spider.particles[0].pos).dot(b2) * flag2 >= 0) {
+        var d2 = web.particles[i].pos.dist2(spider.particles[0].pos);
+        if (!(d2 >= minStepRadius * minStepRadius && d2 <= stepRadius * stepRadius)) continue;
+        var taken = false, j;
+        for (j in spider.constraints) for (var k = 0; k < 8; ++k)
+          if (spider.constraints[j] instanceof DistanceConstraint && spider.constraints[j].a == spider.legs[k] && spider.constraints[j].b == web.particles[i]) taken = true;
+        if (!taken) paths.push(web.particles[i]);
+      }
+    }
+    for (i in spider.constraints)
+      if (spider.constraints[i] instanceof DistanceConstraint && spider.constraints[i].a == spider.legs[leg]) { spider.constraints.splice(i, 1); break; }
+    if (paths.length > 0) { shuffle(paths); spider.constraints.push(new DistanceConstraint(spider.legs[leg], paths[0], 1, 0)); }
+  };
+
+  /* ------------------------------ draw styling ------------------------------ */
+  function styleWeb(web) {
+    web.drawParticles = function() {};   // silk only, no node dots
+    web.drawConstraints = function(ctx, composite) {
+      // Thickness hierarchy follows real orb-web biology:
+      // anchor/bridge silk (thickest, reinforced) > frame > radii >> capture spiral.
+      // Thickness hierarchy (real orb-web biology), levels pulled ~25% closer together:
+      // anchor/bridge > frame > hub/strengthening spiral > radii > capture spiral.
+      var styles = {
+        susp:  { s: "rgba(240,244,250,0.80)", w: 2.5 },   // anchor / bridge dragline (reinforced)
+        frame: { s: "rgba(226,232,240,0.68)", w: 2.0 },   // perimeter frame (often doubled)
+        hub:   { s: "rgba(222,228,238,0.64)", w: 1.7 },   // hub / strengthening spiral (dense turns)
+        ray:   { s: "rgba(206,214,225,0.56)", w: 1.4 },   // radii (spokes)
+        bar:   { s: "rgba(176,184,198,0.22)", w: 0.7 }    // viscid capture spiral (1-5µm, gossamer)
+      };
+      var cons = composite.constraints, i;
+      for (i in cons) {
+        var c = cons[i];
+        if (!(c instanceof DistanceConstraint)) continue;
+        var st = styles[c.kind] || styles.bar;
+        ctx.beginPath();
+        ctx.moveTo(c.a.pos.x, c.a.pos.y);
+        ctx.lineTo(c.b.pos.x, c.b.pos.y);
+        ctx.strokeStyle = st.s; ctx.lineWidth = st.w; ctx.stroke();
+      }
+      // bright dot at the very centre of the hub (where the spider rests)
+      if (composite.hub) {
+        ctx.beginPath();
+        ctx.arc(composite.hub.pos.x, composite.hub.pos.y, 2.5, 0, 2 * Math.PI);
+        ctx.fillStyle = "rgba(232,236,243,0.7)"; ctx.fill();
+      }
+    };
+  }
+
+  function styleSpider(spider) {
+    spider.drawParticles = function() {};
+    spider.drawConstraints = function(ctx, composite) {
+      var i, sc = composite.scale || 1;
+      ctx.fillStyle = "#d8dce3";
+      ctx.beginPath(); ctx.arc(spider.head.pos.x, spider.head.pos.y, 4 * sc, 0, 2 * Math.PI); ctx.fill();
+      ctx.beginPath(); ctx.arc(spider.thorax.pos.x, spider.thorax.pos.y, 4 * sc, 0, 2 * Math.PI); ctx.fill();
+      ctx.beginPath(); ctx.arc(spider.abdomen.pos.x, spider.abdomen.pos.y, 8 * sc, 0, 2 * Math.PI); ctx.fill();
+      for (i = 3; i < composite.constraints.length; ++i) {
+        var c = composite.constraints[i];
+        if (!(c instanceof DistanceConstraint)) continue;
+        ctx.beginPath(); ctx.moveTo(c.a.pos.x, c.a.pos.y); ctx.lineTo(c.b.pos.x, c.b.pos.y);
+        var lw = 1.2;
+        if ((i >= 2 && i <= 4) || (i >= 19 && i <= 20) || (i >= 35 && i <= 36) || (i >= 51 && i <= 52)) lw = 3;
+        else if ((i >= 4 && i <= 6) || (i >= 21 && i <= 22) || (i >= 37 && i <= 38) || (i >= 53 && i <= 54)) lw = 2;
+        ctx.strokeStyle = "#b9bfca"; ctx.lineWidth = Math.max(0.6, lw * sc); ctx.stroke();
+      }
+    };
+  }
+
+  /* ------------------------------ app / loop ------------------------------ */
+  var canvas = document.getElementById("stage");
+  var sim, spiderOn = true;
+
+  function build() {
+    var W = window.innerWidth, H = window.innerHeight;
+    var dpr = window.devicePixelRatio || 1;
+    canvas.style.width = W + "px";
+    canvas.style.height = H + "px";
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    var ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);   // reset (don't compound on rebuild)
+
+    sim = new VerletJS(W, H, canvas);
+    sim.gravity = new Vec2(0, 0.10);   // lighter pull -> web hangs tauter, less sag
+    sim.friction = 0.97;
+    sim.selectionRadius = 24;
+
+    var pointNum = 5 + Math.floor(Math.random() * 3);       // 5..7 anchors
+    var raysPer = 5 + Math.floor(Math.random() * 3);        // 5..7 rays per segment (~2x density)
+    var radiusBase = Math.min(W, H) * 0.30;
+    var web = sim.organicWeb(new Vec2(W / 2, H / 2), {
+      pointNum: pointNum, raysPerSegment: raysPer, levels: 13, radiusBase: radiusBase
+    });
+    styleWeb(web);
+
+    if (spiderOn) {
+      var spider = sim.spider(new Vec2(W / 2, -200), 0.5);   // 50% smaller spider
+      styleSpider(spider);
+    }
+  }
+
+  var legIndex = 0;
+  function loop() {
+    if (spiderOn && sim.composites[1] && Math.floor(Math.random() * 4) === 0)
+      sim.crawl(((legIndex++) * 3) % 8);
+    sim.frame(20);   // more relaxation iterations -> tauter, more stable web
+    sim.draw();
+    requestAnimFrame(loop);
+  }
+
+  // controls
+  document.getElementById("regen").addEventListener("click", build);
+  document.getElementById("toggleSpider").addEventListener("click", function () {
+    spiderOn = !spiderOn; build();
+  });
+  window.addEventListener("keydown", function (e) { if (e.key === "r" || e.key === "R") build(); });
+  var resizeTimer;
+  window.addEventListener("resize", function () {
+    clearTimeout(resizeTimer); resizeTimer = setTimeout(build, 200);
+  });
+
+  build();
+  loop();
+  </script>
+</body>
+</html>
