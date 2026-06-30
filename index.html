@@ -638,42 +638,70 @@
     return !!(de && sp && sp.particles.indexOf(de) >= 0);
   }
 
-  // directed leg-crawl: step the next leg onto a web point toward the goal; body follows
-  function legStepToward(tx, ty) {
-    var sp = sim.composites[1], web = sim.composites[0];
-    var thorax = sp.particles[0].pos;
-    var gdx = tx - thorax.x, gdy = ty - thorax.y, gd = Math.sqrt(gdx * gdx + gdy * gdy) || 1;
-    var gx = gdx / gd, gy = gdy / gd, sc = sp.scale || 1;
-    var reach = 130 * sc, minStep = 28 * sc, best = null, bestScore = -1e9;
-    var ps = web.particles;
+  function nearestWebTo(x, y, maxR) {
+    var ps = sim.composites[0].particles, best = null, bd = maxR * maxR;
     for (var i = 0; i < ps.length; i++) {
-      var dx = ps[i].pos.x - thorax.x, dy = ps[i].pos.y - thorax.y, d2 = dx * dx + dy * dy;
-      if (d2 < minStep * minStep || d2 > reach * reach) continue;
-      var d = Math.sqrt(d2), dot = (dx * gx + dy * gy) / d;   // alignment with goal, -1..1
-      if (dot < 0.25) continue;                                // must be roughly toward the goal
-      var score = dot + (d / reach) * 0.4;                     // toward goal, favour a decent stride
-      if (score > bestScore) { bestScore = score; best = ps[i]; }
+      var dx = ps[i].pos.x - x, dy = ps[i].pos.y - y, d2 = dx * dx + dy * dy;
+      if (d2 < bd) { bd = d2; best = ps[i]; }
     }
-    if (best) {                                                // re-plant the next leg on that point
-      var leg = sp.legs[(legIndex++) % 8], j;
-      for (j = 0; j < sp.constraints.length; j++) {
-        var c = sp.constraints[j];
-        if (c instanceof DistanceConstraint && c.a === leg) { sp.constraints.splice(j, 1); break; }
-      }
-      var grip = new DistanceConstraint(leg, best, 0.55, 0);   // softer grip -> less web yank, more natural
-      grip.isGrip = true;
-      sp.constraints.push(grip);
-      thorax.x += gx * 0.2; thorax.y += gy * 0.2;              // small body assist for smooth progress
-    } else {
-      thorax.x += gx * 2; thorax.y += gy * 2;                  // off the web -> travel back faster to re-grip
+    return best;
+  }
+
+  // remove a leg's existing grip (so it can be re-planted)
+  function dropLegGrip(sp, leg) {
+    for (var j = 0; j < sp.constraints.length; j++) {
+      var c = sp.constraints[j];
+      if (c.isGrip && c.a === leg) { sp.constraints.splice(j, 1); return; }
     }
   }
 
-  // keep the spider clutched near a point (used while wrapping / feeding)
-  function holdNear(x, y) {
+  // release feet that have been dragged far behind -> legs never stay taut (clean stance)
+  function releaseOverstretched() {
     var sp = sim.composites[1]; if (!sp) return;
-    var th = sp.particles[0].pos, dx = x - th.x, dy = y - th.y, d = Math.sqrt(dx * dx + dy * dy) || 1;
-    if (d > 4) { th.x += dx / d * 0.4; th.y += dy / d * 0.4; }
+    var max = 95 * (sp.scale || 1);
+    for (var j = sp.constraints.length - 1; j >= 0; j--) {
+      var c = sp.constraints[j];
+      if (c.isGrip && c.a.pos.sub(c.b.pos).length() > max) sp.constraints.splice(j, 1);
+    }
+  }
+
+  // directed leg-crawl: plant the next leg on a web point toward the goal; the grip pulls
+  // the body along (this is what moves the spider). A small assist smooths progress.
+  function legStepToward(tx, ty) {
+    var sp = sim.composites[1], web = sim.composites[0], thorax = sp.particles[0].pos;
+    var gdx = tx - thorax.x, gdy = ty - thorax.y, gd = Math.sqrt(gdx * gdx + gdy * gdy) || 1;
+    var gx = gdx / gd, gy = gdy / gd, sc = sp.scale || 1;
+    var reach = 130 * sc, minStep = 28 * sc, best = null, bestScore = -1e9, ps = web.particles;
+    for (var i = 0; i < ps.length; i++) {
+      var dx = ps[i].pos.x - thorax.x, dy = ps[i].pos.y - thorax.y, d2 = dx * dx + dy * dy;
+      if (d2 < minStep * minStep || d2 > reach * reach) continue;
+      var d = Math.sqrt(d2), dot = (dx * gx + dy * gy) / d;
+      if (dot < 0.25) continue;
+      var score = dot + (d / reach) * 0.4;
+      if (score > bestScore) { bestScore = score; best = ps[i]; }
+    }
+    if (best) {
+      var leg = sp.legs[(legIndex++) % 8];
+      dropLegGrip(sp, leg);
+      var g = new DistanceConstraint(leg, best, 0.55, 0); g.isGrip = true; sp.constraints.push(g);
+      thorax.x += gx * 0.2; thorax.y += gy * 0.2;
+    } else {
+      thorax.x += gx * 2; thorax.y += gy * 2;   // off the web -> travel back faster to re-grip
+    }
+  }
+
+  // settle: plant the next leg on the nearest web point under its foot (gathers the legs
+  // around the body so the stance looks natural while wrapping / feeding)
+  function settleStep() {
+    var sp = sim.composites[1], sc = sp.scale || 1, leg = sp.legs[(legIndex++) % 8];
+    var best = nearestWebTo(leg.pos.x, leg.pos.y, 120 * sc);
+    if (best) { dropLegGrip(sp, leg); var g = new DistanceConstraint(leg, best, 0.5, 0); g.isGrip = true; sp.constraints.push(g); }
+  }
+
+  // gentle clutch toward a point (used while wrapping / feeding)
+  function holdNear(x, y) {
+    var th = sim.composites[1].particles[0].pos, dx = x - th.x, dy = y - th.y, d = Math.sqrt(dx * dx + dy * dy) || 1;
+    if (d > 4) { th.x += dx / d * 0.15; th.y += dy / d * 0.15; }
   }
 
   // detach feet that the drag has stretched far -> the spider can be pulled off the web
@@ -704,9 +732,14 @@
       return;
     }
 
+    // torn off the web: drift back toward the hub every frame until the feet can re-grip
+    if (!hasGrip(sp)) {
+      var rdx = hub.x - thorax.x, rdy = hub.y - thorax.y, rd = Math.sqrt(rdx * rdx + rdy * rdy) || 1;
+      thorax.x += rdx / rd * 1.5; thorax.y += rdy / rd * 1.5;
+    }
+
     stepClock++;
-    var doStep = (stepClock % 6 === 0);                         // leg cadence
-    var t;
+    var doStep = (stepClock % 5 === 0), t;   // leg cadence
 
     if (spiderState === "toCenter") {
       if (doStep) legStepToward(hub.x, hub.y);
@@ -715,47 +748,51 @@
     } else if (spiderState === "waiting") {
       var bp = bestPrey();
       if (bp) { spiderTarget = bp; spiderState = "approaching"; }          // catch first (newest)
-      else { var pc = pendingCocoon(); if (pc) { spiderTarget = pc; spiderState = "toFeed"; } }  // then feed leftovers
+      else { var pc = pendingCocoon(); if (pc) { spiderTarget = pc; spiderState = "toFeed"; }  // then feed leftovers
+             else if (!hasGrip(sp)) spiderState = "toCenter"; }            // torn off and idle -> crawl back
+      if (doStep) settleStep();                                            // keep feet under the body
 
     } else if (spiderState === "approaching") {
-      var bp = bestPrey();
-      if (!bp) { spiderTarget = null; spiderState = "toCenter"; return; }
-      if (bp !== spiderTarget) spiderTarget = bp;               // always chase the newest catchable prey
+      var bp2 = bestPrey();
+      if (!bp2) { spiderTarget = null; spiderState = "toCenter"; return; }
+      if (bp2 !== spiderTarget) spiderTarget = bp2;        // always chase the newest catchable prey
       t = spiderTarget;
       if (doStep) legStepToward(t.x, t.y);
-      if (Math.hypot(thorax.x - t.x, thorax.y - t.y) < 46 * sc) { t.state = "wrapping"; spiderState = "wrapping"; }
+      if (Math.hypot(thorax.x - t.x, thorax.y - t.y) < 44 * sc) { t.state = "wrapping"; spiderState = "wrapping"; }
 
     } else if (spiderState === "wrapping") {
       t = spiderTarget;
       if (!t || t.state !== "wrapping") { spiderTarget = null; spiderState = "toCenter"; return; }
-      var newer = bestPrey();                                   // a NEWER prey lures it away (partial wrap is kept)
+      var newer = bestPrey();                              // a NEWER prey lures it away (partial wrap kept)
       if (newer && newer.id > t.id) { spiderTarget = newer; spiderState = "approaching"; return; }
-      holdNear(t.x, t.y);
-      t.wrap = Math.min(1, t.wrap + (t.wrapRate || 0.006));     // cocoon grows over 4-8s by prey size
+      holdNear(t.x, t.y);                                  // settle gently onto the prey
+      if (doStep) settleStep();                            // gather the legs around the prey (no taut stance)
+      t.wrap = Math.min(1, t.wrap + (t.wrapRate || 0.006));
       if (t.wrap >= 1) { t.state = "carried"; t.anchor = null; spiderState = "carrying"; }
 
-    } else if (spiderState === "carrying") {                    // NON-interruptible: finish hauling to centre
+    } else if (spiderState === "carrying") {               // NON-interruptible: haul to the centre
       t = spiderTarget;
       if (!t || t.state !== "carried") { spiderTarget = null; spiderState = "toCenter"; return; }
-      t.x = thorax.x; t.y = thorax.y;
       if (doStep) legStepToward(hub.x, hub.y);
+      t.x = thorax.x; t.y = thorax.y;
       if (Math.hypot(thorax.x - hub.x, thorax.y - hub.y) < 46) {
         t.state = "feeding"; t.cx = hub.x + (Math.random() - 0.5) * 20; t.cy = hub.y + (Math.random() - 0.5) * 20;
         spiderState = "feeding";
       }
 
-    } else if (spiderState === "toFeed") {                      // walking back to a left-over cocoon
+    } else if (spiderState === "toFeed") {                 // walk back to a left-over cocoon
       t = spiderTarget;
       if (!t || t.state !== "feeding") { spiderTarget = null; spiderState = "waiting"; return; }
       if (bestPrey()) { spiderTarget = bestPrey(); spiderState = "approaching"; return; }   // fresh prey first
       if (doStep) legStepToward(t.cx, t.cy);
-      if (Math.hypot(thorax.x - t.cx, thorax.y - t.cy) < 46) spiderState = "feeding";
+      if (Math.hypot(thorax.x - t.cx, thorax.y - t.cy) < 44) spiderState = "feeding";
 
     } else if (spiderState === "feeding") {
       t = spiderTarget;
       if (!t || t.state !== "feeding") { spiderTarget = null; spiderState = "waiting"; return; }
       if (bestPrey()) { spiderTarget = bestPrey(); spiderState = "approaching"; return; }   // drop cocoon, hunt; resume later
       holdNear(t.cx, t.cy);
+      if (doStep) settleStep();
       t.feed = Math.min(1, t.feed + 0.0035);
       if (t.feed >= 1) { t.state = "dropping"; t.vy = 0; t.fvx = (Math.random() - 0.5) * 1; spiderTarget = null; spiderState = "waiting"; }
 
@@ -763,8 +800,7 @@
       spiderState = "toCenter";
     }
 
-    // recovery: if it was torn off the web and is now idle, crawl back toward the centre
-    if (spiderState === "waiting" && !hasGrip(sp)) spiderState = "toCenter";
+    releaseOverstretched();   // never let a foot stay dragged taut -> clean stance, no jitter
   }
 
   var legIndex = 0;
