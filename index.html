@@ -503,7 +503,7 @@
       speed: spec.speed, wobble: spec.wobble, ang: 0, phase: Math.random() * 6.283,
       size: 0.8 + Math.random() * 0.6,   // slight size variation -> depth / spatial feel
       id: ++bugSeq,                       // arrival order (for "newest prey" targeting)
-      t: 0, state: "arriving", anchor: null, struggle: 1, wrap: 0
+      t: 0, state: "arriving", anchor: null, struggle: 1, wrap: 0, feed: 0
     });
   }
 
@@ -531,7 +531,7 @@
         if (nr.p && (d < 12 || (nr.d2 < 12 * 12 && Math.random() < 0.05))) {
           b.state = "stuck"; b.anchor = nr.p; b.struggle = 1;
         }
-      } else if (b.state === "stuck") {
+      } else if (b.state === "stuck" || b.state === "wrapping") {
         if (!b.anchor) { bugs.splice(i, 1); continue; }
         b.x = b.anchor.pos.x; b.y = b.anchor.pos.y;   // ride the web point
         if (b.struggle > 0.05) {                      // struggle shakes the web, decaying
@@ -540,7 +540,12 @@
           b.anchor.pos.y += (Math.random() - 0.5) * amp;
           b.struggle *= 0.992;
         }
+      } else if (b.state === "dropping") {            // drained husk falls and fades
+        b.vy = (b.vy || 0) + 0.25; b.y += b.vy; b.x += (b.fvx || 0);
+        b.drop = (b.drop || 0) + 0.02;
+        if (b.y > sim.height + 40 || b.drop >= 1) bugs.splice(i, 1);
       }
+      // carried / feeding: position is set by the spider, nothing to do here
     }
   }
 
@@ -580,10 +585,20 @@
     for (var i = 0; i < bugs.length; i++) {
       var b = bugs[i];
       ctx.save();
+      ctx.globalAlpha = 1 - (b.drop || 0);                       // fade while dropping away
       ctx.translate(b.x, b.y);
       ctx.rotate(b.ang);
-      ctx.scale(b.size, b.size);
+      var fs = b.size * (1 - (b.feed || 0) * 0.55);              // shrink as it is drained
+      ctx.scale(fs, fs);
       drawBugShape(ctx, b.type);
+      if (b.wrap > 0) {                                          // silk cocoon overlay
+        ctx.globalAlpha = (1 - (b.drop || 0)) * Math.min(0.9, b.wrap);
+        ctx.fillStyle = "rgba(236,239,245,0.95)";
+        ctx.beginPath(); ctx.ellipse(0, 0, 12, 7.5, 0, 0, 6.283); ctx.fill();
+        ctx.strokeStyle = "rgba(255,255,255,0.6)"; ctx.lineWidth = 0.6;
+        var turns = Math.floor(b.wrap * 6);
+        for (var w = 0; w < turns; w++) { ctx.beginPath(); ctx.ellipse(0, 0, 12, 7.5, w * 0.5, 0, 6.283); ctx.stroke(); }
+      }
       ctx.restore();
     }
   }
@@ -629,6 +644,13 @@
     thorax.x += gx * 0.2; thorax.y += gy * 0.2;                // small body assist (reduced) for smooth progress
   }
 
+  // keep the spider clutched near a point (used while wrapping / feeding)
+  function holdNear(x, y) {
+    var sp = sim.composites[1]; if (!sp) return;
+    var th = sp.particles[0].pos, dx = x - th.x, dy = y - th.y, d = Math.sqrt(dx * dx + dy * dy) || 1;
+    if (d > 4) { th.x += dx / d * 0.4; th.y += dy / d * 0.4; }
+  }
+
   function updateSpider() {
     if (!spiderOn) return;
     var sp = sim.composites[1]; if (!sp) return;
@@ -648,13 +670,26 @@
       var newest = newestStuckBug();
       if (newest && newest !== t) { spiderTarget = t = newest; }   // attracted to the newest prey
       if (doStep) legStepToward(t.x, t.y);
-      if (Math.hypot(thorax.x - t.x, thorax.y - t.y) < 50 * sc) spiderState = "atPrey";
-    } else if (spiderState === "atPrey") {
+      if (Math.hypot(thorax.x - t.x, thorax.y - t.y) < 46 * sc) { t.state = "wrapping"; spiderState = "wrapping"; }
+    } else if (spiderState === "wrapping") {
       var t = spiderTarget;
-      if (!t || t.state !== "stuck") { spiderTarget = null; spiderState = "toCenter"; return; }
-      var newest2 = newestStuckBug();
-      if (newest2 && newest2 !== t) { spiderTarget = newest2; spiderState = "approaching"; return; }
-      if (doStep) legStepToward(t.x, t.y);   // stay on the prey (Phase 3 will wrap/carry/feed)
+      if (!t) { spiderState = "toCenter"; return; }
+      holdNear(t.x, t.y);                          // stay clutched onto the prey
+      t.wrap = Math.min(1, t.wrap + 0.006);        // bite + spin silk around it (cocoon grows)
+      if (t.wrap >= 1) { t.state = "carried"; t.anchor = null; spiderState = "carrying"; }
+    } else if (spiderState === "carrying") {
+      var t = spiderTarget;
+      if (!t) { spiderState = "toCenter"; return; }
+      t.x = thorax.x; t.y = thorax.y;              // prey clutched under the spider
+      if (doStep) legStepToward(hub.x, hub.y);
+      if (Math.hypot(thorax.x - hub.x, thorax.y - hub.y) < 46) { t.state = "feeding"; spiderState = "feeding"; }
+    } else if (spiderState === "feeding") {
+      var t = spiderTarget;
+      if (!t) { spiderState = "waiting"; return; }
+      holdNear(hub.x, hub.y);
+      t.x = thorax.x; t.y = thorax.y;              // hold the cocoon at the hub and drain it
+      t.feed = Math.min(1, t.feed + 0.0035);
+      if (t.feed >= 1) { t.state = "dropping"; t.vy = 0; t.fvx = (Math.random() - 0.5) * 1; spiderTarget = null; spiderState = "waiting"; }
     }
   }
 
