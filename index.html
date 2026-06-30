@@ -5,10 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Spiderweb — gregkepler algorithm × verlet-js physics</title>
 <style>
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #111118; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
   #stage {
     display: block;
-    background: radial-gradient(circle at 50% 42%, #1c1c26 0%, #14141c 55%, #0d0d12 100%);
+    background: #000;
     cursor: grab;
   }
   #stage:active { cursor: grabbing; }
@@ -61,10 +61,10 @@
     var raysPer = opts.raysPerSegment;     // rays between two anchors
     var levels = opts.levels;              // bar levels per ray (barPointAmt)
 
-    var stiffSusp  = 0.99;   // anchor -> screen edge (taut, reinforced)
-    var stiffFrame = 0.96;   // outer perimeter ring (taut)
-    var stiffRay   = 0.93;   // radial threads (stiff dragline)
-    var stiffBar   = 0.55;   // capture-spiral bars (kept elastic, as in nature)
+    var stiffSusp  = 0.995;  // anchor -> screen edge (very taut, reinforced)
+    var stiffFrame = 0.98;   // outer perimeter ring (taut)
+    var stiffRay   = 0.96;   // radial threads (stiff dragline)
+    var stiffBar   = 0.62;   // capture-spiral bars (kept elastic, as in nature)
 
     var W = this.width, H = this.height, inset = 10;
     var cx = origin.x, cy = origin.y;
@@ -279,11 +279,11 @@
       // Thickness hierarchy (real orb-web biology), levels pulled ~25% closer together:
       // anchor/bridge > frame > hub/strengthening spiral > radii > capture spiral.
       var styles = {
-        susp:  { s: "rgba(240,244,250,0.80)", w: 2.5 },   // anchor / bridge dragline (reinforced)
-        frame: { s: "rgba(226,232,240,0.68)", w: 2.0 },   // perimeter frame (often doubled)
+        susp:  { s: "rgba(240,244,250,0.78)", w: 2.3 },   // anchor / bridge dragline (reinforced)
+        frame: { s: "rgba(226,232,240,0.68)", w: 1.9 },   // perimeter frame (often doubled)
         hub:   { s: "rgba(222,228,238,0.64)", w: 1.7 },   // hub / strengthening spiral (dense turns)
-        ray:   { s: "rgba(206,214,225,0.56)", w: 1.4 },   // radii (spokes)
-        bar:   { s: "rgba(176,184,198,0.22)", w: 0.7 }    // viscid capture spiral (1-5µm, gossamer)
+        ray:   { s: "rgba(206,214,225,0.58)", w: 1.5 },   // radii (spokes)
+        bar:   { s: "rgba(180,188,202,0.28)", w: 0.9 }    // viscid capture spiral (1-5µm, gossamer)
       };
       var cons = composite.constraints, i;
       for (i in cons) {
@@ -308,10 +308,7 @@
     spider.drawParticles = function() {};
     spider.drawConstraints = function(ctx, composite) {
       var i, sc = composite.scale || 1;
-      ctx.fillStyle = "#d8dce3";
-      ctx.beginPath(); ctx.arc(spider.head.pos.x, spider.head.pos.y, 4 * sc, 0, 2 * Math.PI); ctx.fill();
-      ctx.beginPath(); ctx.arc(spider.thorax.pos.x, spider.thorax.pos.y, 4 * sc, 0, 2 * Math.PI); ctx.fill();
-      ctx.beginPath(); ctx.arc(spider.abdomen.pos.x, spider.abdomen.pos.y, 8 * sc, 0, 2 * Math.PI); ctx.fill();
+      // --- legs: glossy black with a faint rim so the silhouette reads on a pure-black bg ---
       for (i = 3; i < composite.constraints.length; ++i) {
         var c = composite.constraints[i];
         if (!(c instanceof DistanceConstraint)) continue;
@@ -319,8 +316,31 @@
         var lw = 1.2;
         if ((i >= 2 && i <= 4) || (i >= 19 && i <= 20) || (i >= 35 && i <= 36) || (i >= 51 && i <= 52)) lw = 3;
         else if ((i >= 4 && i <= 6) || (i >= 21 && i <= 22) || (i >= 37 && i <= 38) || (i >= 53 && i <= 54)) lw = 2;
-        ctx.strokeStyle = "#b9bfca"; ctx.lineWidth = Math.max(0.6, lw * sc); ctx.stroke();
+        ctx.strokeStyle = "#3a3a40"; ctx.lineWidth = Math.max(0.6, lw * sc); ctx.stroke();
       }
+      // --- body: glossy black widow, dark fill + subtle rim light + specular highlight ---
+      function bead(p, r) {
+        ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, 2 * Math.PI);
+        ctx.fillStyle = "#0a0a0c"; ctx.fill();
+        ctx.lineWidth = 0.8 * sc; ctx.strokeStyle = "rgba(120,124,134,0.55)"; ctx.stroke();
+        ctx.beginPath(); ctx.arc(p.x - r * 0.3, p.y - r * 0.35, r * 0.28, 0, 2 * Math.PI);
+        ctx.fillStyle = "rgba(190,195,205,0.5)"; ctx.fill();   // specular sheen
+      }
+      var ab = spider.abdomen.pos, th = spider.thorax.pos;
+      bead(spider.head.pos, 4 * sc);
+      bead(th, 4 * sc);
+      bead(ab, 8 * sc);
+      // --- red hourglass on the abdomen, aligned with the body axis ---
+      var ang = Math.atan2(ab.y - th.y, ab.x - th.x);
+      var al = { x: Math.cos(ang), y: Math.sin(ang) };          // along body
+      var pe = { x: -Math.sin(ang), y: Math.cos(ang) };         // perpendicular
+      var L = 5.5 * sc, Wd = 3.6 * sc;
+      function pt(d, w) { return { x: ab.x + al.x * d + pe.x * w, y: ab.y + al.y * d + pe.y * w }; }
+      ctx.fillStyle = "#d61f2b";
+      var t1a = pt(L, Wd), t1b = pt(L, -Wd);                    // tail-side triangle
+      ctx.beginPath(); ctx.moveTo(ab.x, ab.y); ctx.lineTo(t1a.x, t1a.y); ctx.lineTo(t1b.x, t1b.y); ctx.closePath(); ctx.fill();
+      var t2a = pt(-L, Wd), t2b = pt(-L, -Wd);                  // head-side triangle
+      ctx.beginPath(); ctx.moveTo(ab.x, ab.y); ctx.lineTo(t2a.x, t2a.y); ctx.lineTo(t2b.x, t2b.y); ctx.closePath(); ctx.fill();
     };
   }
 
@@ -339,7 +359,7 @@
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);   // reset (don't compound on rebuild)
 
     sim = new VerletJS(W, H, canvas);
-    sim.gravity = new Vec2(0, 0.10);   // lighter pull -> web hangs tauter, less sag
+    sim.gravity = new Vec2(0, 0.05);   // halved pull -> ~50% less sag, much tauter web
     sim.friction = 0.97;
     sim.selectionRadius = 24;
 
@@ -361,7 +381,7 @@
   function loop() {
     if (spiderOn && sim.composites[1] && Math.floor(Math.random() * 4) === 0)
       sim.crawl(((legIndex++) * 3) % 8);
-    sim.frame(20);   // more relaxation iterations -> tauter, more stable web
+    sim.frame(26);   // more relaxation iterations -> tauter, more stable web
     sim.draw();
     requestAnimFrame(loop);
   }
