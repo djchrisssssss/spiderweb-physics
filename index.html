@@ -385,17 +385,22 @@
     if (spiderOn) {
       var spider = sim.spider(new Vec2(W / 2 + (Math.random() - 0.5) * 220, -200), 0.75);  // spider size (0.5 -> 0.75, +50%)
       styleSpider(spider);
-      // natural, varied fall: small random sideways drift + slight tumble around the body
-      var vx = (Math.random() - 0.5) * 1.6, spin = (Math.random() - 0.5) * 0.05, th = spider.thorax.pos;
+      // hang head-down: point-reflect the spider 180 deg about its thorax so the abdomen
+      // (where the silk attaches) is on top; the head + legs then hang below under gravity
+      var th = spider.thorax.pos;
       for (var pi = 0; pi < spider.particles.length; pi++) {
-        var p = spider.particles[pi], dx = p.pos.x - th.x, dy = p.pos.y - th.y;
-        p.lastPos.x -= (vx - dy * spin);   // velocity = pos - lastPos
-        p.lastPos.y -= (dx * spin);
+        var p = spider.particles[pi];
+        p.pos.x = 2 * th.x - p.pos.x; p.pos.y = 2 * th.y - p.pos.y;
+        p.lastPos.x = 2 * th.x - p.lastPos.x; p.lastPos.y = 2 * th.y - p.lastPos.y;
       }
-      // descent silk (dragline) spun from the abdomen, anchored where the spider started
+      // gentle pendulum sway during descent (no violent tumble)
+      var sway = (Math.random() - 0.5) * 1.2;
+      for (var pi = 0; pi < spider.particles.length; pi++) spider.particles[pi].lastPos.x -= sway;
+      // physical descent silk: anchored above, paid out over time, attached to the abdomen
       drag = {
         phase: "descend",
         anchor: { x: spider.abdomen.pos.x, y: spider.abdomen.pos.y },
+        length: 0, payout: 3,
         mode: Math.random() < 0.5 ? "drift" : "fall",   // what the silk does after landing
         pts: null, life: 1, age: 0
       };
@@ -409,9 +414,18 @@
     if (!sp) { drag = null; return; }
     drag.age++;
     if (drag.phase === "descend") {
-      // reached the web (near its centre) or fell long enough -> release the silk
-      if (sp.thorax.pos.y >= sim.height * 0.46 || drag.age > 1200) {
-        var n = 16, a = drag.anchor, b = sp.abdomen.pos;
+      // pay out silk and hold the abdomen at the silk's end; gravity keeps the head/legs
+      // hanging below -> natural head-down posture (this runs AFTER sim.frame each tick)
+      drag.length += drag.payout;
+      // web gravity is tiny (taut web), so add a uniform extra downward pull to the whole
+      // spider for a paced fall. Uniform => no torque => the head-down orientation is preserved.
+      for (var pi = 0; pi < sp.particles.length; pi++) sp.particles[pi].lastPos.y -= 0.03;
+      var ab = sp.abdomen, dx = ab.pos.x - drag.anchor.x, dy = ab.pos.y - drag.anchor.y;
+      var d = Math.sqrt(dx * dx + dy * dy) || 1e-6;
+      if (d > drag.length) { var f = (d - drag.length) / d; ab.pos.x -= dx * f; ab.pos.y -= dy * f; }  // silk can't over-stretch
+      // reached the web centre -> release the silk
+      if (ab.pos.y >= sim.height * 0.5 - 30 || drag.age > 1600) {
+        var n = 16, a = drag.anchor, b = ab.pos;
         drag.pts = [];
         for (var k = 0; k <= n; k++) {
           var t = k / n;
@@ -459,11 +473,11 @@
 
   var legIndex = 0;
   function loop() {
-    // step a leg ~1/8 frames (half the old 1/4 rate) -> spider crawls 50% slower
-    if (spiderOn && sim.composites[1] && Math.floor(Math.random() * 8) === 0)
+    // crawl only once on the web (not while descending on the silk)
+    if (spiderOn && sim.composites[1] && (!drag || drag.phase !== "descend") && Math.floor(Math.random() * 8) === 0)
       sim.crawl(((legIndex++) * 3) % 8);
-    updateDrag();
-    sim.frame(30);   // more relaxation iterations -> tauter, more stable web
+    sim.frame(30);   // physics first
+    updateDrag();    // then the silk constraint / phase logic (final positional step)
     sim.draw();
     drawDrag();      // dragline drawn on top of the web
     requestAnimFrame(loop);
