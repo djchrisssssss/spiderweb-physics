@@ -286,6 +286,8 @@
         ray:   { s: "rgba(206,214,225,0.58)", w: 0.5 },   // radii (spokes)
         bar:   { s: "rgba(180,188,202,0.28)", w: 0.45 }   // viscid capture spiral (gossamer)
       };
+      ctx.save();
+      ctx.globalAlpha = 0.5;   // render the whole web at 50% opacity
       var cons = composite.constraints, i;
       for (i in cons) {
         var c = cons[i];
@@ -302,6 +304,7 @@
         ctx.arc(composite.hub.pos.x, composite.hub.pos.y, 2.5, 0, 2 * Math.PI);
         ctx.fillStyle = "rgba(232,236,243,0.7)"; ctx.fill();
       }
+      ctx.restore();
     };
   }
 
