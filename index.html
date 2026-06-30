@@ -267,7 +267,8 @@
     }
     for (i in spider.constraints)
       if (spider.constraints[i] instanceof DistanceConstraint && spider.constraints[i].a == spider.legs[leg]) { spider.constraints.splice(i, 1); break; }
-    if (paths.length > 0) { shuffle(paths); spider.constraints.push(new DistanceConstraint(spider.legs[leg], paths[0], 1, 0)); }
+    // grip the web gently (stiffness 0.25) so the spider disturbs/shakes the web ~75% less
+    if (paths.length > 0) { shuffle(paths); spider.constraints.push(new DistanceConstraint(spider.legs[leg], paths[0], 0.25, 0)); }
   };
 
   /* ------------------------------ draw styling ------------------------------ */
@@ -279,11 +280,11 @@
       // Thickness hierarchy (real orb-web biology), levels pulled ~25% closer together:
       // anchor/bridge > frame > hub/strengthening spiral > radii > capture spiral.
       var styles = {
-        susp:  { s: "rgba(240,244,250,0.78)", w: 2.3 },   // anchor / bridge dragline (reinforced)
-        frame: { s: "rgba(226,232,240,0.68)", w: 1.9 },   // perimeter frame (often doubled)
-        hub:   { s: "rgba(222,228,238,0.64)", w: 1.7 },   // hub / strengthening spiral (dense turns)
-        ray:   { s: "rgba(206,214,225,0.58)", w: 1.5 },   // radii (spokes)
-        bar:   { s: "rgba(180,188,202,0.28)", w: 0.9 }    // viscid capture spiral (1-5µm, gossamer)
+        susp:  { s: "rgba(240,244,250,0.78)", w: 1.15 },  // anchor / bridge dragline (halved)
+        frame: { s: "rgba(226,232,240,0.68)", w: 1.08 },  // perimeter frame (often doubled)
+        hub:   { s: "rgba(222,228,238,0.64)", w: 1.04 },  // hub / strengthening spiral (dense turns)
+        ray:   { s: "rgba(206,214,225,0.58)", w: 1.0 },   // radii (spokes)
+        bar:   { s: "rgba(180,188,202,0.28)", w: 0.9 }    // viscid capture spiral (unchanged)
       };
       var cons = composite.constraints, i;
       for (i in cons) {
