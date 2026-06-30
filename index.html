@@ -195,8 +195,9 @@
     composite.scale = scale;
 
     composite.thorax = new Particle(origin);
-    composite.head = new Particle(origin.add(new Vec2(0, -5 * scale)));
-    composite.abdomen = new Particle(origin.add(new Vec2(0, 10 * scale)));
+    var tilt = (Math.random() - 0.5) * 5 * scale;   // slight body-axis tilt, not perfectly upright
+    composite.head = new Particle(origin.add(new Vec2(tilt, -5 * scale)));
+    composite.abdomen = new Particle(origin.add(new Vec2(-tilt, 10 * scale)));
     composite.particles.push(composite.thorax, composite.head, composite.abdomen);
     composite.constraints.push(new DistanceConstraint(composite.head, composite.thorax, bodyStiffness));
     composite.constraints.push(new DistanceConstraint(composite.abdomen, composite.thorax, bodyStiffness));
@@ -210,20 +211,24 @@
       composite.constraints.push(new DistanceConstraint(composite.particles[len - 1], composite.thorax, legSeg));
 
       var lenCoef = 1; if (i == 1 || i == 2) lenCoef = 0.7; else if (i == 3) lenCoef = 0.9;
-      composite.particles.push(new Particle(composite.particles[len - 2].pos.add((new Vec2(20, (i - 1.5) * 30)).normal().mutableScale(20 * lenCoef * scale))));
-      composite.particles.push(new Particle(composite.particles[len - 1].pos.add((new Vec2(-20, (i - 1.5) * 30)).normal().mutableScale(20 * lenCoef * scale))));
+      // natural asymmetry: each individual leg gets its own length factor + splay jitter,
+      // so the pose is never perfectly symmetric and differs on every spawn
+      var rR = 0.8 + Math.random() * 0.5, rL = 0.8 + Math.random() * 0.5;
+      var aR = (Math.random() - 0.5) * 16, aL = (Math.random() - 0.5) * 16;
+      composite.particles.push(new Particle(composite.particles[len - 2].pos.add((new Vec2(20, (i - 1.5) * 30 + aR)).normal().mutableScale(20 * lenCoef * scale * rR))));
+      composite.particles.push(new Particle(composite.particles[len - 1].pos.add((new Vec2(-20, (i - 1.5) * 30 + aL)).normal().mutableScale(20 * lenCoef * scale * rL))));
       len = composite.particles.length;
       composite.constraints.push(new DistanceConstraint(composite.particles[len - 4], composite.particles[len - 2], legSeg));
       composite.constraints.push(new DistanceConstraint(composite.particles[len - 3], composite.particles[len - 1], legSeg));
 
-      composite.particles.push(new Particle(composite.particles[len - 2].pos.add((new Vec2(20, (i - 1.5) * 50)).normal().mutableScale(20 * lenCoef * scale))));
-      composite.particles.push(new Particle(composite.particles[len - 1].pos.add((new Vec2(-20, (i - 1.5) * 50)).normal().mutableScale(20 * lenCoef * scale))));
+      composite.particles.push(new Particle(composite.particles[len - 2].pos.add((new Vec2(20, (i - 1.5) * 50 + aR)).normal().mutableScale(20 * lenCoef * scale * rR))));
+      composite.particles.push(new Particle(composite.particles[len - 1].pos.add((new Vec2(-20, (i - 1.5) * 50 + aL)).normal().mutableScale(20 * lenCoef * scale * rL))));
       len = composite.particles.length;
       composite.constraints.push(new DistanceConstraint(composite.particles[len - 4], composite.particles[len - 2], legSeg));
       composite.constraints.push(new DistanceConstraint(composite.particles[len - 3], composite.particles[len - 1], legSeg));
 
-      var rightFoot = new Particle(composite.particles[len - 2].pos.add((new Vec2(20, (i - 1.5) * 100)).normal().mutableScale(12 * lenCoef * scale)));
-      var leftFoot = new Particle(composite.particles[len - 1].pos.add((new Vec2(-20, (i - 1.5) * 100)).normal().mutableScale(12 * lenCoef * scale)));
+      var rightFoot = new Particle(composite.particles[len - 2].pos.add((new Vec2(20, (i - 1.5) * 100 + aR)).normal().mutableScale(12 * lenCoef * scale * rR)));
+      var leftFoot = new Particle(composite.particles[len - 1].pos.add((new Vec2(-20, (i - 1.5) * 100 + aL)).normal().mutableScale(12 * lenCoef * scale * rL)));
       composite.particles.push(rightFoot, leftFoot);
       composite.legs.push(rightFoot, leftFoot);
       len = composite.particles.length;
@@ -376,8 +381,15 @@
     styleWeb(web);
 
     if (spiderOn) {
-      var spider = sim.spider(new Vec2(W / 2, -200), 0.75);  // spider size (0.5 -> 0.75, +50%)
+      var spider = sim.spider(new Vec2(W / 2 + (Math.random() - 0.5) * 220, -200), 0.75);  // spider size (0.5 -> 0.75, +50%)
       styleSpider(spider);
+      // natural, varied fall: small random sideways drift + slight tumble around the body
+      var vx = (Math.random() - 0.5) * 1.6, spin = (Math.random() - 0.5) * 0.05, th = spider.thorax.pos;
+      for (var pi = 0; pi < spider.particles.length; pi++) {
+        var p = spider.particles[pi], dx = p.pos.x - th.x, dy = p.pos.y - th.y;
+        p.lastPos.x -= (vx - dy * spin);   // velocity = pos - lastPos
+        p.lastPos.y -= (dx * spin);
+      }
     }
   }
 
