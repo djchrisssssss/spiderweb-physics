@@ -384,6 +384,7 @@
 
     drag = null;
     bugs = [];
+    heldBug = null;
     spiderState = "descend"; spiderTarget = null; stepClock = 0;
     if (spiderOn) {
       var spider = sim.spider(new Vec2(W / 2 + (Math.random() - 0.5) * 220, -200), 0.75);  // spider size (0.5 -> 0.75, +50%)
@@ -478,6 +479,7 @@
   /* ---------------- prey insects (Phase 1: arrive, stick, struggle) ---------------- */
   var bugs = [];
   var bugSeq = 0;
+  var heldBug = null;   // an insect currently grabbed by the mouse
   var BUG_TYPES = ["fly", "moth", "ant", "roach"];
   var BUG_SPEC = {
     fly:   { speed: 6.0, wobble: 3.4 },
@@ -517,9 +519,12 @@
   }
 
   function updateBugs() {
+    if (heldBug) sim.draggedEntity = null;   // don't let the web be dragged while plucking a bug
     for (var i = bugs.length - 1; i >= 0; i--) {
       var b = bugs[i]; b.t++;
-      if (b.state === "arriving") {
+      if (b.state === "held") {               // follows the mouse while grabbed
+        b.x = sim.mouse.x; b.y = sim.mouse.y;
+      } else if (b.state === "arriving") {
         var dx = b.tx - b.x, dy = b.ty - b.y, d = Math.sqrt(dx * dx + dy * dy) || 1;
         b.ang = Math.atan2(dy, dx);
         var nx = dx / d, ny = dy / d, perp = Math.sin(b.t * 0.3 + b.phase) * b.wobble;
@@ -617,6 +622,12 @@
     return best;
   }
 
+  // true if the user is currently dragging one of the spider's own particles
+  function spiderGrabbed() {
+    var de = sim.draggedEntity, sp = sim.composites[1];
+    return !!(de && sp && sp.particles.indexOf(de) >= 0);
+  }
+
   // directed leg-crawl: step the next leg onto a web point toward the goal; body follows
   function legStepToward(tx, ty) {
     var sp = sim.composites[1], web = sim.composites[0];
@@ -656,6 +667,14 @@
     var sp = sim.composites[1]; if (!sp) return;
     if (spiderState === "descend") return;                     // handled by updateDrag
     var thorax = sp.particles[0].pos, hub = sim.composites[0].hub.pos, sc = sp.scale || 1;
+    // if the user is flinging the spider, pause the AI (freeze wrap/feed timers) but keep
+    // any clutched prey attached so it gets dragged along; resume on release
+    if (spiderGrabbed()) {
+      if ((spiderState === "carrying" || spiderState === "feeding") && spiderTarget) {
+        spiderTarget.x = thorax.x; spiderTarget.y = thorax.y;
+      }
+      return;
+    }
     stepClock++;
     var doStep = (stepClock % 6 === 0);                         // leg cadence
     if (spiderState === "toCenter") {
@@ -673,19 +692,19 @@
       if (Math.hypot(thorax.x - t.x, thorax.y - t.y) < 46 * sc) { t.state = "wrapping"; spiderState = "wrapping"; }
     } else if (spiderState === "wrapping") {
       var t = spiderTarget;
-      if (!t) { spiderState = "toCenter"; return; }
+      if (!t || t.state !== "wrapping") { spiderTarget = null; spiderState = "toCenter"; return; }  // prey lost/grabbed
       holdNear(t.x, t.y);                          // stay clutched onto the prey
       t.wrap = Math.min(1, t.wrap + 0.006);        // bite + spin silk around it (cocoon grows)
       if (t.wrap >= 1) { t.state = "carried"; t.anchor = null; spiderState = "carrying"; }
     } else if (spiderState === "carrying") {
       var t = spiderTarget;
-      if (!t) { spiderState = "toCenter"; return; }
+      if (!t || t.state !== "carried") { spiderTarget = null; spiderState = "toCenter"; return; }   // prey lost/grabbed
       t.x = thorax.x; t.y = thorax.y;              // prey clutched under the spider
       if (doStep) legStepToward(hub.x, hub.y);
       if (Math.hypot(thorax.x - hub.x, thorax.y - hub.y) < 46) { t.state = "feeding"; spiderState = "feeding"; }
     } else if (spiderState === "feeding") {
       var t = spiderTarget;
-      if (!t) { spiderState = "waiting"; return; }
+      if (!t || t.state !== "feeding") { spiderTarget = null; spiderState = "waiting"; return; }     // prey lost/grabbed
       holdNear(hub.x, hub.y);
       t.x = thorax.x; t.y = thorax.y;              // hold the cocoon at the hub and drain it
       t.feed = Math.min(1, t.feed + 0.0035);
@@ -706,6 +725,23 @@
   }
 
   // controls
+  // let the mouse pluck a stuck/wrapping insect off the web (it then falls away)
+  canvas.addEventListener("mousedown", function (e) {
+    if (!sim) return;
+    var rect = canvas.getBoundingClientRect(), mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    var best = null, bd = 26 * 26;
+    for (var i = 0; i < bugs.length; i++) {
+      var b = bugs[i];
+      if (b.state !== "stuck" && b.state !== "wrapping") continue;
+      var dx = b.x - mx, dy = b.y - my, d = dx * dx + dy * dy;
+      if (d < bd) { bd = d; best = b; }
+    }
+    if (best) { heldBug = best; best.state = "held"; best.anchor = null; sim.draggedEntity = null; }
+  });
+  canvas.addEventListener("mouseup", function () {
+    if (heldBug) { heldBug.state = "dropping"; heldBug.vy = 0; heldBug.fvx = (Math.random() - 0.5) * 1; heldBug = null; }
+  });
+
   document.getElementById("addBug").addEventListener("click", function () { spawnBug(); });
   document.getElementById("regen").addEventListener("click", build);
   document.getElementById("toggleSpider").addEventListener("click", function () {
