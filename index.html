@@ -356,6 +356,7 @@
   /* ------------------------------ app / loop ------------------------------ */
   var canvas = document.getElementById("stage");
   var sim, spiderOn = true;
+  var drag = null;   // the spider's descent silk (dragline)
 
   function build() {
     var W = window.innerWidth, H = window.innerHeight;
@@ -380,6 +381,7 @@
     });
     styleWeb(web);
 
+    drag = null;
     if (spiderOn) {
       var spider = sim.spider(new Vec2(W / 2 + (Math.random() - 0.5) * 220, -200), 0.75);  // spider size (0.5 -> 0.75, +50%)
       styleSpider(spider);
@@ -390,7 +392,69 @@
         p.lastPos.x -= (vx - dy * spin);   // velocity = pos - lastPos
         p.lastPos.y -= (dx * spin);
       }
+      // descent silk (dragline) spun from the abdomen, anchored where the spider started
+      drag = {
+        phase: "descend",
+        anchor: { x: spider.abdomen.pos.x, y: spider.abdomen.pos.y },
+        mode: Math.random() < 0.5 ? "drift" : "fall",   // what the silk does after landing
+        pts: null, life: 1, age: 0
+      };
     }
+  }
+
+  // advance the dragline: extend while falling, then release (drift away / fall) on landing
+  function updateDrag() {
+    if (!drag || !spiderOn) return;
+    var sp = sim.composites[1];
+    if (!sp) { drag = null; return; }
+    drag.age++;
+    if (drag.phase === "descend") {
+      // reached the web (near its centre) or fell long enough -> release the silk
+      if (sp.thorax.pos.y >= sim.height * 0.46 || drag.age > 1200) {
+        var n = 16, a = drag.anchor, b = sp.abdomen.pos;
+        drag.pts = [];
+        for (var k = 0; k <= n; k++) {
+          var t = k / n;
+          drag.pts.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, vx: 0, vy: 0 });
+        }
+        drag.phase = "release";
+      }
+    } else if (drag.phase === "release") {
+      drag.life -= 0.012;                       // fade over ~80 frames
+      var pts = drag.pts, k;
+      if (drag.mode === "drift") {              // gossamer floats up & sideways on the air
+        for (k = 0; k < pts.length; k++) {
+          pts[k].x += 0.6 + Math.sin(k * 0.5 + (1 - drag.life) * 4) * 0.3;
+          pts[k].y -= 0.45 + (pts.length - k) * 0.02;
+        }
+      } else {                                  // silk lets go and drops
+        for (k = 0; k < pts.length; k++) {
+          pts[k].vy += 0.06; pts[k].vx += (Math.random() - 0.5) * 0.04;
+          pts[k].x += pts[k].vx; pts[k].y += pts[k].vy;
+        }
+      }
+      if (drag.life <= 0) drag = null;
+    }
+  }
+
+  // draw the dragline on top of the web (its own opacity, not the web's 50%)
+  function drawDrag() {
+    if (!drag || !spiderOn) return;
+    var ctx = sim.ctx, sp = sim.composites[1];
+    var alpha = drag.phase === "descend" ? 0.5 : 0.5 * Math.max(0, drag.life);
+    ctx.save();
+    ctx.strokeStyle = "rgba(234,238,244," + alpha + ")";
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    if (drag.phase === "descend" && sp) {
+      ctx.moveTo(drag.anchor.x, drag.anchor.y);
+      ctx.lineTo(sp.abdomen.pos.x, sp.abdomen.pos.y);
+    } else if (drag.pts) {
+      ctx.moveTo(drag.pts[0].x, drag.pts[0].y);
+      for (var k = 1; k < drag.pts.length; k++) ctx.lineTo(drag.pts[k].x, drag.pts[k].y);
+    }
+    ctx.stroke();
+    ctx.restore();
   }
 
   var legIndex = 0;
@@ -398,8 +462,10 @@
     // step a leg ~1/8 frames (half the old 1/4 rate) -> spider crawls 50% slower
     if (spiderOn && sim.composites[1] && Math.floor(Math.random() * 8) === 0)
       sim.crawl(((legIndex++) * 3) % 8);
+    updateDrag();
     sim.frame(30);   // more relaxation iterations -> tauter, more stable web
     sim.draw();
+    drawDrag();      // dragline drawn on top of the web
     requestAnimFrame(loop);
   }
 
