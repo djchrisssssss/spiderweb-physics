@@ -384,6 +384,7 @@
 
     drag = null;
     bugs = [];
+    spiderState = "descend"; spiderTarget = null; stepClock = 0;
     if (spiderOn) {
       var spider = sim.spider(new Vec2(W / 2 + (Math.random() - 0.5) * 220, -200), 0.75);  // spider size (0.5 -> 0.75, +50%)
       styleSpider(spider);
@@ -434,6 +435,7 @@
           drag.pts.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, vx: 0, vy: 0 });
         }
         drag.phase = "release";
+        spiderState = "toCenter";   // landed -> walk to the hub centre and wait for prey
       }
     } else if (drag.phase === "release") {
       drag.life -= 0.012;                       // fade over ~80 frames
@@ -475,6 +477,7 @@
 
   /* ---------------- prey insects (Phase 1: arrive, stick, struggle) ---------------- */
   var bugs = [];
+  var bugSeq = 0;
   var BUG_TYPES = ["fly", "moth", "ant", "roach"];
   var BUG_SPEC = {
     fly:   { speed: 6.0, wobble: 3.4 },
@@ -499,6 +502,7 @@
       tx: W / 2 + Math.cos(ang) * rad, ty: H / 2 + Math.sin(ang) * rad,
       speed: spec.speed, wobble: spec.wobble, ang: 0, phase: Math.random() * 6.283,
       size: 0.8 + Math.random() * 0.6,   // slight size variation -> depth / spatial feel
+      id: ++bugSeq,                       // arrival order (for "newest prey" targeting)
       t: 0, state: "arriving", anchor: null, struggle: 1, wrap: 0
     });
   }
@@ -584,12 +588,80 @@
     }
   }
 
+  /* ---------------- spider hunting AI (Phase 2: return to centre, wait, approach) ---------- */
+  var spiderState = "descend";   // descend -> toCenter -> waiting -> approaching -> atPrey
+  var spiderTarget = null;
+  var stepClock = 0;
+
+  function newestStuckBug() {
+    var best = null;
+    for (var i = 0; i < bugs.length; i++) {
+      var b = bugs[i];
+      if (b.state === "stuck" && (!best || b.id > best.id)) best = b;
+    }
+    return best;
+  }
+
+  // directed leg-crawl: step the next leg onto a web point toward the goal; body follows
+  function legStepToward(tx, ty) {
+    var sp = sim.composites[1], web = sim.composites[0];
+    var thorax = sp.particles[0].pos;
+    var gdx = tx - thorax.x, gdy = ty - thorax.y, gd = Math.sqrt(gdx * gdx + gdy * gdy) || 1;
+    var gx = gdx / gd, gy = gdy / gd, sc = sp.scale || 1;
+    var reach = 130 * sc, minStep = 28 * sc, best = null, bestScore = -1e9;
+    var ps = web.particles;
+    for (var i = 0; i < ps.length; i++) {
+      var dx = ps[i].pos.x - thorax.x, dy = ps[i].pos.y - thorax.y, d2 = dx * dx + dy * dy;
+      if (d2 < minStep * minStep || d2 > reach * reach) continue;
+      var d = Math.sqrt(d2), dot = (dx * gx + dy * gy) / d;   // alignment with goal, -1..1
+      if (dot < 0.25) continue;                                // must be roughly toward the goal
+      var score = dot + (d / reach) * 0.4;                     // toward goal, favour a decent stride
+      if (score > bestScore) { bestScore = score; best = ps[i]; }
+    }
+    if (best) {                                                // re-plant the next leg on that point
+      var leg = sp.legs[(legIndex++) % 8], j;
+      for (j = 0; j < sp.constraints.length; j++) {
+        var c = sp.constraints[j];
+        if (c instanceof DistanceConstraint && c.a === leg) { sp.constraints.splice(j, 1); break; }
+      }
+      sp.constraints.push(new DistanceConstraint(leg, best, 1, 0));
+    }
+    thorax.x += gx * 0.5; thorax.y += gy * 0.5;                // small body assist for smooth progress
+  }
+
+  function updateSpider() {
+    if (!spiderOn) return;
+    var sp = sim.composites[1]; if (!sp) return;
+    if (spiderState === "descend") return;                     // handled by updateDrag
+    var thorax = sp.particles[0].pos, hub = sim.composites[0].hub.pos, sc = sp.scale || 1;
+    stepClock++;
+    var doStep = (stepClock % 6 === 0);                         // leg cadence
+    if (spiderState === "toCenter") {
+      if (doStep) legStepToward(hub.x, hub.y);
+      if (Math.hypot(thorax.x - hub.x, thorax.y - hub.y) < 45) spiderState = "waiting";
+    } else if (spiderState === "waiting") {
+      var t = newestStuckBug();
+      if (t) { spiderTarget = t; spiderState = "approaching"; }
+    } else if (spiderState === "approaching") {
+      var t = spiderTarget;
+      if (!t || t.state !== "stuck") { spiderTarget = null; spiderState = "toCenter"; return; }
+      var newest = newestStuckBug();
+      if (newest && newest !== t) { spiderTarget = t = newest; }   // attracted to the newest prey
+      if (doStep) legStepToward(t.x, t.y);
+      if (Math.hypot(thorax.x - t.x, thorax.y - t.y) < 50 * sc) spiderState = "atPrey";
+    } else if (spiderState === "atPrey") {
+      var t = spiderTarget;
+      if (!t || t.state !== "stuck") { spiderTarget = null; spiderState = "toCenter"; return; }
+      var newest2 = newestStuckBug();
+      if (newest2 && newest2 !== t) { spiderTarget = newest2; spiderState = "approaching"; return; }
+      if (doStep) legStepToward(t.x, t.y);   // stay on the prey (Phase 3 will wrap/carry/feed)
+    }
+  }
+
   var legIndex = 0;
   function loop() {
-    // crawl only once on the web (not while descending on the silk)
-    if (spiderOn && sim.composites[1] && (!drag || drag.phase !== "descend") && Math.floor(Math.random() * 8) === 0)
-      sim.crawl(((legIndex++) * 3) % 8);
     updateBugs();    // insects fly in / struggle (struggle perturbs the web)
+    updateSpider();  // hunting AI: return to centre, wait, approach newest prey (directed leg-crawl)
     sim.frame(30);   // physics first
     updateDrag();    // then the silk constraint / phase logic (final positional step)
     sim.draw();
