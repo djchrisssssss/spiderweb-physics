@@ -499,11 +499,13 @@
     // target a random DEPTH on the web (0.15 = near hub, 1.0 = rim) so prey lands inside & out
     var ang = Math.random() * 6.283, rad = (0.15 + Math.random() * 0.85) * Math.min(W, H) * 0.3;
     var spec = BUG_SPEC[type];
+    var size = 0.8 + Math.random() * 0.6;                 // size variation -> depth / spatial feel
+    var wrapSecs = 4 + ((size - 0.8) / 0.6) * 4;          // wrap time scales with prey size: 4s..8s
     bugs.push({
       type: type, x: x, y: y,
       tx: W / 2 + Math.cos(ang) * rad, ty: H / 2 + Math.sin(ang) * rad,
       speed: spec.speed, wobble: spec.wobble, ang: 0, phase: Math.random() * 6.283,
-      size: 0.8 + Math.random() * 0.6,   // slight size variation -> depth / spatial feel
+      size: size, wrapRate: 1 / (wrapSecs * 60),          // per-frame (~60fps) cocoon growth
       id: ++bugSeq,                       // arrival order (for "newest prey" targeting)
       t: 0, state: "arriving", anchor: null, struggle: 1, wrap: 0, feed: 0
     });
@@ -593,8 +595,7 @@
       ctx.globalAlpha = 1 - (b.drop || 0);                       // fade while dropping away
       ctx.translate(b.x, b.y);
       ctx.rotate(b.ang);
-      var fs = b.size * (1 - (b.feed || 0) * 0.55);              // shrink as it is drained
-      ctx.scale(fs, fs);
+      ctx.scale(b.size, b.size);                                // feeding is timed, no visible shrink
       drawBugShape(ctx, b.type);
       if (b.wrap > 0) {                                          // silk cocoon overlay
         ctx.globalAlpha = (1 - (b.drop || 0)) * Math.min(0.9, b.wrap);
@@ -694,7 +695,7 @@
       var t = spiderTarget;
       if (!t || t.state !== "wrapping") { spiderTarget = null; spiderState = "toCenter"; return; }  // prey lost/grabbed
       holdNear(t.x, t.y);                          // stay clutched onto the prey
-      t.wrap = Math.min(1, t.wrap + 0.006);        // bite + spin silk around it (cocoon grows)
+      t.wrap = Math.min(1, t.wrap + (t.wrapRate || 0.006));   // cocoon grows over 4-8s by prey size
       if (t.wrap >= 1) { t.state = "carried"; t.anchor = null; spiderState = "carrying"; }
     } else if (spiderState === "carrying") {
       var t = spiderTarget;
