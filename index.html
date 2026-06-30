@@ -547,12 +547,14 @@
           b.anchor.pos.y += (Math.random() - 0.5) * amp;
           b.struggle *= 0.992;
         }
+      } else if (b.state === "feeding") {             // cocoon rests at its centre spot (even if left)
+        if (b.cx != null) { b.x = b.cx; b.y = b.cy; }
       } else if (b.state === "dropping") {            // drained husk falls and fades
         b.vy = (b.vy || 0) + 0.25; b.y += b.vy; b.x += (b.fvx || 0);
         b.drop = (b.drop || 0) + 0.02;
         if (b.y > sim.height + 40 || b.drop >= 1) bugs.splice(i, 1);
       }
-      // carried / feeding: position is set by the spider, nothing to do here
+      // carried: position is set by the spider, nothing to do here
     }
   }
 
@@ -614,13 +616,20 @@
   var spiderTarget = null;
   var stepClock = 0;
 
-  function newestStuckBug() {
+  // newest catchable prey: stuck, or a partially-wrapped one that was abandoned mid-wrap
+  function bestPrey() {
     var best = null;
     for (var i = 0; i < bugs.length; i++) {
       var b = bugs[i];
-      if (b.state === "stuck" && (!best || b.id > best.id)) best = b;
+      if ((b.state === "stuck" || b.state === "wrapping") && (!best || b.id > best.id)) best = b;
     }
     return best;
+  }
+
+  // a cocoon left at the centre waiting to be eaten (lowest priority, after all catching)
+  function pendingCocoon() {
+    for (var i = 0; i < bugs.length; i++) if (bugs[i].state === "feeding") return bugs[i];
+    return null;
   }
 
   // true if the user is currently dragging one of the spider's own particles
@@ -651,9 +660,13 @@
         var c = sp.constraints[j];
         if (c instanceof DistanceConstraint && c.a === leg) { sp.constraints.splice(j, 1); break; }
       }
-      sp.constraints.push(new DistanceConstraint(leg, best, 1, 0));
+      var grip = new DistanceConstraint(leg, best, 0.55, 0);   // softer grip -> less web yank, more natural
+      grip.isGrip = true;
+      sp.constraints.push(grip);
+      thorax.x += gx * 0.2; thorax.y += gy * 0.2;              // small body assist for smooth progress
+    } else {
+      thorax.x += gx * 2; thorax.y += gy * 2;                  // off the web -> travel back faster to re-grip
     }
-    thorax.x += gx * 0.2; thorax.y += gy * 0.2;                // small body assist (reduced) for smooth progress
   }
 
   // keep the spider clutched near a point (used while wrapping / feeding)
@@ -663,54 +676,95 @@
     if (d > 4) { th.x += dx / d * 0.4; th.y += dy / d * 0.4; }
   }
 
+  // detach feet that the drag has stretched far -> the spider can be pulled off the web
+  function detachStretchedGrips(sp, maxLen) {
+    for (var j = sp.constraints.length - 1; j >= 0; j--) {
+      var c = sp.constraints[j];
+      if (c.isGrip && c.a.pos.sub(c.b.pos).length() > maxLen) sp.constraints.splice(j, 1);
+    }
+  }
+  function hasGrip(sp) {
+    for (var k = 0; k < sp.constraints.length; k++) if (sp.constraints[k].isGrip) return true;
+    return false;
+  }
+
   function updateSpider() {
     if (!spiderOn) return;
     var sp = sim.composites[1]; if (!sp) return;
     if (spiderState === "descend") return;                     // handled by updateDrag
     var thorax = sp.particles[0].pos, hub = sim.composites[0].hub.pos, sc = sp.scale || 1;
-    // if the user is flinging the spider, pause the AI (freeze wrap/feed timers) but keep
-    // any clutched prey attached so it gets dragged along; resume on release
+
+    // user is dragging the spider: pause the AI, let stretched feet tear off the web,
+    // keep any clutched prey attached; the state resumes on release
     if (spiderGrabbed()) {
+      detachStretchedGrips(sp, 40);   // pulled feet let go one by one -> spider tears off the web
       if ((spiderState === "carrying" || spiderState === "feeding") && spiderTarget) {
         spiderTarget.x = thorax.x; spiderTarget.y = thorax.y;
       }
       return;
     }
+
     stepClock++;
     var doStep = (stepClock % 6 === 0);                         // leg cadence
+    var t;
+
     if (spiderState === "toCenter") {
       if (doStep) legStepToward(hub.x, hub.y);
       if (Math.hypot(thorax.x - hub.x, thorax.y - hub.y) < 45) spiderState = "waiting";
+
     } else if (spiderState === "waiting") {
-      var t = newestStuckBug();
-      if (t) { spiderTarget = t; spiderState = "approaching"; }
+      var bp = bestPrey();
+      if (bp) { spiderTarget = bp; spiderState = "approaching"; }          // catch first (newest)
+      else { var pc = pendingCocoon(); if (pc) { spiderTarget = pc; spiderState = "toFeed"; } }  // then feed leftovers
+
     } else if (spiderState === "approaching") {
-      var t = spiderTarget;
-      if (!t || t.state !== "stuck") { spiderTarget = null; spiderState = "toCenter"; return; }
-      var newest = newestStuckBug();
-      if (newest && newest !== t) { spiderTarget = t = newest; }   // attracted to the newest prey
+      var bp = bestPrey();
+      if (!bp) { spiderTarget = null; spiderState = "toCenter"; return; }
+      if (bp !== spiderTarget) spiderTarget = bp;               // always chase the newest catchable prey
+      t = spiderTarget;
       if (doStep) legStepToward(t.x, t.y);
       if (Math.hypot(thorax.x - t.x, thorax.y - t.y) < 46 * sc) { t.state = "wrapping"; spiderState = "wrapping"; }
+
     } else if (spiderState === "wrapping") {
-      var t = spiderTarget;
-      if (!t || t.state !== "wrapping") { spiderTarget = null; spiderState = "toCenter"; return; }  // prey lost/grabbed
-      holdNear(t.x, t.y);                          // stay clutched onto the prey
-      t.wrap = Math.min(1, t.wrap + (t.wrapRate || 0.006));   // cocoon grows over 4-8s by prey size
+      t = spiderTarget;
+      if (!t || t.state !== "wrapping") { spiderTarget = null; spiderState = "toCenter"; return; }
+      var newer = bestPrey();                                   // a NEWER prey lures it away (partial wrap is kept)
+      if (newer && newer.id > t.id) { spiderTarget = newer; spiderState = "approaching"; return; }
+      holdNear(t.x, t.y);
+      t.wrap = Math.min(1, t.wrap + (t.wrapRate || 0.006));     // cocoon grows over 4-8s by prey size
       if (t.wrap >= 1) { t.state = "carried"; t.anchor = null; spiderState = "carrying"; }
-    } else if (spiderState === "carrying") {
-      var t = spiderTarget;
-      if (!t || t.state !== "carried") { spiderTarget = null; spiderState = "toCenter"; return; }   // prey lost/grabbed
-      t.x = thorax.x; t.y = thorax.y;              // prey clutched under the spider
+
+    } else if (spiderState === "carrying") {                    // NON-interruptible: finish hauling to centre
+      t = spiderTarget;
+      if (!t || t.state !== "carried") { spiderTarget = null; spiderState = "toCenter"; return; }
+      t.x = thorax.x; t.y = thorax.y;
       if (doStep) legStepToward(hub.x, hub.y);
-      if (Math.hypot(thorax.x - hub.x, thorax.y - hub.y) < 46) { t.state = "feeding"; spiderState = "feeding"; }
+      if (Math.hypot(thorax.x - hub.x, thorax.y - hub.y) < 46) {
+        t.state = "feeding"; t.cx = hub.x + (Math.random() - 0.5) * 20; t.cy = hub.y + (Math.random() - 0.5) * 20;
+        spiderState = "feeding";
+      }
+
+    } else if (spiderState === "toFeed") {                      // walking back to a left-over cocoon
+      t = spiderTarget;
+      if (!t || t.state !== "feeding") { spiderTarget = null; spiderState = "waiting"; return; }
+      if (bestPrey()) { spiderTarget = bestPrey(); spiderState = "approaching"; return; }   // fresh prey first
+      if (doStep) legStepToward(t.cx, t.cy);
+      if (Math.hypot(thorax.x - t.cx, thorax.y - t.cy) < 46) spiderState = "feeding";
+
     } else if (spiderState === "feeding") {
-      var t = spiderTarget;
-      if (!t || t.state !== "feeding") { spiderTarget = null; spiderState = "waiting"; return; }     // prey lost/grabbed
-      holdNear(hub.x, hub.y);
-      t.x = thorax.x; t.y = thorax.y;              // hold the cocoon at the hub and drain it
+      t = spiderTarget;
+      if (!t || t.state !== "feeding") { spiderTarget = null; spiderState = "waiting"; return; }
+      if (bestPrey()) { spiderTarget = bestPrey(); spiderState = "approaching"; return; }   // drop cocoon, hunt; resume later
+      holdNear(t.cx, t.cy);
       t.feed = Math.min(1, t.feed + 0.0035);
       if (t.feed >= 1) { t.state = "dropping"; t.vy = 0; t.fvx = (Math.random() - 0.5) * 1; spiderTarget = null; spiderState = "waiting"; }
+
+    } else {
+      spiderState = "toCenter";
     }
+
+    // recovery: if it was torn off the web and is now idle, crawl back toward the centre
+    if (spiderState === "waiting" && !hasGrip(sp)) spiderState = "toCenter";
   }
 
   var legIndex = 0;
