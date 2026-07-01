@@ -2,6 +2,8 @@
 
 *[English README](./README.md)*
 
+![黑寡婦蜘蛛在程序化生成的蛛網中心進食，網上各深度都黏著獵物](./docs/screenshot.jpg)
+
 一個單檔、幾乎零依賴、**可以用滑鼠拉扯**的蜘蛛網。它把兩個經典的蛛網 demo 合而為一：
 
 - Greg Kepler 的 *spider-webs-js* 的**結網生成演算法**（有機放射錨點 → 懸吊框 → 輻射絲 →

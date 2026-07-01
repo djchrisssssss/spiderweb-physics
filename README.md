@@ -2,6 +2,8 @@
 
 *[繁體中文版 README](./README.zh-TW.md)*
 
+![A black-widow spider feeding at the hub of a procedurally generated web, with prey stuck at various depths](./docs/screenshot.jpg)
+
 A single-file, dependency-light spider web you can **grab and pull**. It marries two
 classic web demos:
 
