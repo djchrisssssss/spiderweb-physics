@@ -532,7 +532,7 @@
     var ang = Math.random() * 6.283, rad = (0.15 + Math.random() * 0.85) * Math.min(W, H) * 0.3;
     var spec = BUG_SPEC[type];
     var size = 0.8 + Math.random() * 0.6;                 // size variation -> depth / spatial feel
-    var wrapSecs = 4 + ((size - 0.8) / 0.6) * 4;          // wrap time scales with prey size: 4s..8s
+    var wrapSecs = 8 + ((size - 0.8) / 0.6) * 8;          // wrap time scales with prey size: 8s..16s (2x)
     bugs.push({
       type: type, x: x, y: y,
       tx: W / 2 + Math.cos(ang) * rad, ty: H / 2 + Math.sin(ang) * rad,
@@ -962,7 +962,7 @@
       holdNear(t.cx, t.cy); stationary = true;
       t.held = true;
       var mpF = mouthPos(sp); t.x = mpF.x; t.y = mpF.y;   // held up to the mouth while feeding, not parked below
-      t.feed = Math.min(1, t.feed + 0.0035);
+      t.feed = Math.min(1, t.feed + 0.00175);   // half rate -> feeding takes 2x as long
       if (t.feed >= 1) { t.held = false; t.state = "dropping"; t.vy = 0; t.fvx = (Math.random() - 0.5) * 1; spiderTarget = null; spiderState = "waiting"; }
 
     } else {
