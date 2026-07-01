@@ -512,12 +512,12 @@
   var bugs = [];
   var bugSeq = 0;
   var heldBug = null;   // an insect currently grabbed by the mouse
-  var BUG_TYPES = ["fly", "moth", "ant", "roach"];
+  var BUG_TYPES = ["fly", "moth", "mosquito", "roach"];
   var BUG_SPEC = {
-    fly:   { speed: 6.0, wobble: 3.4 },
-    moth:  { speed: 3.0, wobble: 1.3 },
-    ant:   { speed: 2.6, wobble: 0.4 },
-    roach: { speed: 4.6, wobble: 1.5 }
+    fly:      { speed: 6.0, wobble: 3.4 },
+    moth:     { speed: 3.0, wobble: 1.3 },
+    mosquito: { speed: 2.4, wobble: 1.6 },   // erratic, hovering flight -- ants can't fly at all
+    roach:    { speed: 4.6, wobble: 1.5 }
   };
 
   function spawnBug(type) {
@@ -634,16 +634,25 @@
       ctx.strokeStyle = "#2a2720"; ctx.lineWidth = 0.35;         // feeler antennae
       ctx.beginPath(); ctx.moveTo(2, -1); ctx.quadraticCurveTo(6, -4, 8, -3.5); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(2, 1); ctx.quadraticCurveTo(6, 4, 8, 3.5); ctx.stroke();
-    } else if (type === "ant") {
-      softShadow(ctx, 0, 0, 8, 3);
-      ctx.strokeStyle = "#2a1712"; ctx.lineWidth = 0.7;
-      for (var k = -1; k <= 1; k++) { ctx.beginPath(); ctx.moveTo(-2, 0); ctx.lineTo(-2 + k * 3, k === 0 ? 5 : 4); ctx.stroke(); }
-      shadeEllipse(ctx, -6, 0, 4, 4, "#8a3527", "#2e0d08");      // abdomen
-      shadeEllipse(ctx, 0, 0, 2.6, 2.6, "#8a3527", "#2e0d08");   // thorax
-      shadeEllipse(ctx, 5, 0, 3, 3, "#8a3527", "#2e0d08");       // head
-      ctx.strokeStyle = "#3a1a12"; ctx.lineWidth = 0.35;         // antennae
-      ctx.beginPath(); ctx.moveTo(6.5, -0.5); ctx.quadraticCurveTo(9, -2.5, 9.5, -1.5); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(6.5, 0.5); ctx.quadraticCurveTo(9, 2.5, 9.5, 1.5); ctx.stroke();
+    } else if (type === "mosquito") {
+      softShadow(ctx, -1, 0, 9, 3);
+      ctx.strokeStyle = "#2a2420"; ctx.lineWidth = 0.35;         // long thin dangling legs, 3 pairs w/ a bent knee
+      var leg = function(x0, ang1, ang2, len1, len2) {
+        var kx = x0 + Math.cos(ang1) * len1, ky = Math.sin(ang1) * len1;
+        var ex = kx + Math.cos(ang2) * len2, ey = ky + Math.sin(ang2) * len2;
+        ctx.beginPath(); ctx.moveTo(x0, 0); ctx.quadraticCurveTo(kx, ky, ex, ey); ctx.stroke();
+      };
+      leg(2, Math.PI * 0.35, Math.PI * 0.45, 6, 7); leg(2, -Math.PI * 0.35, -Math.PI * 0.45, 6, 7);
+      leg(0, Math.PI * 0.55, Math.PI * 0.62, 6, 8); leg(0, -Math.PI * 0.55, -Math.PI * 0.62, 6, 8);
+      leg(-2, Math.PI * 0.72, Math.PI * 0.78, 5, 8); leg(-2, -Math.PI * 0.72, -Math.PI * 0.78, 5, 8);
+      ctx.fillStyle = "rgba(200,205,215,0.3)";                   // narrow translucent wings
+      ctx.beginPath(); ctx.ellipse(0, -2, 5.5, 1.6, -0.25, 0, 6.283); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(0, 2, 5.5, 1.6, 0.25, 0, 6.283); ctx.fill();
+      shadeEllipse(ctx, -4, 0, 5.5, 1.2, "#8a7860", "#2a2016");  // slender tapered abdomen
+      shadeEllipse(ctx, 1.5, 0, 1.8, 1.5, "#7a6a54", "#241c12"); // thorax
+      shadeEllipse(ctx, 5, 0, 1.4, 1.4, "#6a5a46", "#20180e");   // head
+      ctx.strokeStyle = "#241c12"; ctx.lineWidth = 0.4;          // proboscis
+      ctx.beginPath(); ctx.moveTo(6.2, 0); ctx.lineTo(10, 0); ctx.stroke();
     } else { // roach
       softShadow(ctx, 2, 0, 10, 5);
       ctx.strokeStyle = "#4a3218"; ctx.lineWidth = 0.9;

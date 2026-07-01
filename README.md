@@ -30,7 +30,7 @@ The silk thicknesses, the central **strengthening spiral**, and the sticky-free
   deforms and recovers.
 - 🕷 **Black-widow spider** — descends head-down on a silk dragline, walks the web on a
   ≥4-feet gait, and can be torn off the web if you drag it far.
-- 🐛 **Live hunting simulation** — spawn insects (fly / moth / ant / roach) that fly in and
+- 🐛 **Live hunting simulation** — spawn insects (fly / moth / mosquito / roach) that fly in and
   stick anywhere on the web; the spider hunts them: approach → bite & wrap into a cocoon →
   carry to the hub → feed → the drained husk drops away. With realistic prey-priority logic.
 - 🔬 **Biologically informed** — silk thickness hierarchy, hub strengthening spiral and a
