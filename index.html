@@ -718,6 +718,38 @@
     }
   }
 
+  // like groundLegs, but skips the given leg indices (used to keep the front/middle legs
+  // planted while the hind legs are freed to swing/fling silk during wrapping)
+  function groundLegsExcept(min, exclude) {
+    var sp = sim.composites[1]; if (!sp) return;
+    var sc = sp.scale || 1, reach = 120 * sc, cnt = 0, need = [];
+    for (var k = 0; k < 8; k++) {
+      if (exclude.indexOf(k) >= 0) continue;
+      if (legGripped(sp, sp.legs[k])) cnt++; else need.push(k);
+    }
+    for (var i = 0; i < need.length && cnt < min; i++) {
+      var leg = sp.legs[need[i]], best = nearestWebTo(leg.pos.x, leg.pos.y, reach);
+      if (best) { var g = new DistanceConstraint(leg, best, 0.3, 0); g.isGrip = true; sp.constraints.push(g); cnt++; }
+    }
+  }
+
+  // hind legs (III/IV pair, closest to the abdomen) fling silk in an alternating orbit
+  // around the prey while wrapping -- real spiders spin the cocoon with their back legs
+  var wrapPhase = 0;
+  function updateWrapLegs(sc, cx, cy) {
+    var sp = sim.composites[1], back = [6, 7];
+    wrapPhase += 0.28;
+    for (var i = 0; i < 2; i++) {
+      var leg = sp.legs[back[i]];
+      dropLegGrip(sp, leg);            // free the hind foot so it can sweep, not anchored to a thread
+      var ang = wrapPhase + (i === 0 ? 0 : Math.PI);          // opposite sides -> criss-cross fling
+      var rad = (16 * sc) * (0.85 + 0.15 * Math.sin(wrapPhase * 2 + i * Math.PI));
+      var tx = cx + Math.cos(ang) * rad, ty = cy + Math.sin(ang) * rad;
+      leg.pos.x += (tx - leg.pos.x) * 0.6;
+      leg.pos.y += (ty - leg.pos.y) * 0.6;
+    }
+  }
+
   // gentle clutch toward a point (used while wrapping / feeding)
   function holdNear(x, y) {
     var th = sim.composites[1].particles[0].pos, dx = x - th.x, dy = y - th.y, d = Math.sqrt(dx * dx + dy * dy) || 1;
@@ -811,7 +843,9 @@
       if (!t || t.state !== "wrapping") { spiderTarget = null; spiderState = "toCenter"; return; }
       var newer = bestPrey();                              // a NEWER prey lures it away (partial wrap kept)
       if (newer && newer.id > t.id) { spiderTarget = newer; spiderState = "approaching"; return; }
-      holdNear(t.x, t.y); stationary = true;               // settle gently onto the prey
+      holdNear(t.x, t.y);                                  // settle gently onto the prey
+      updateWrapLegs(sc, t.x, t.y);                        // hind legs sweep/fling silk around the prey
+      groundLegsExcept(4, [6, 7]);                         // front/middle legs stay planted for stability
       t.wrap = Math.min(1, t.wrap + (t.wrapRate || 0.006));
       if (t.wrap >= 1) { t.state = "carried"; t.anchor = null; spiderState = "carrying"; }
 
