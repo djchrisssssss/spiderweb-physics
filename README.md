@@ -26,8 +26,11 @@ The silk thicknesses, the central **strengthening spiral**, and the sticky-free
   organic gaps, Y-shaped strands and reinforcement threads.
 - 🧲 **Real verlet physics** — drag any thread or the spider with the mouse; the web
   deforms and recovers.
-- 🕷 **Autonomous spider** — an 8-legged verlet spider that grips and crawls the web (and
-  can be pulled off it).
+- 🕷 **Black-widow spider** — descends head-down on a silk dragline, walks the web on a
+  ≥4-feet gait, and can be torn off the web if you drag it far.
+- 🐛 **Live hunting simulation** — spawn insects (fly / moth / ant / roach) that fly in and
+  stick anywhere on the web; the spider hunts them: approach → bite & wrap into a cocoon →
+  carry to the hub → feed → the drained husk drops away. With realistic prey-priority logic.
 - 🔬 **Biologically informed** — silk thickness hierarchy, hub strengthening spiral and a
   central free zone modeled on real orb webs.
 - 📦 **Self-contained** — one `index.html` + one vendored `verlet-1.0.0.js` (53 KB). No build
@@ -50,7 +53,9 @@ browsers throttle in background tabs.
 
 | Action | Effect |
 | --- | --- |
-| **Drag** (mouse down + move) | grab the nearest thread / the spider and pull |
+| **🐛 放昆蟲** button | spawn a random insect that flies onto the web |
+| **Drag a thread / the spider** | pull it around; drag the spider far to tear it off the web (it crawls back) |
+| **Drag an insect** | pluck a stuck insect off the web (it falls away) |
 | **R** key / **重新結網** button | regenerate a brand-new random web |
 | **蜘蛛開關** button | toggle the spider on/off |
 | resize window | the web rebuilds to fit |
@@ -95,6 +100,52 @@ Two structural details modeled from the literature:
   spider sits.
 - **Strengthening spiral** — several tight non-sticky turns reinforcing the hub (so the
   centre is denser, not every ring).
+
+## Hunting simulation
+
+Insects are lightweight objects (not verlet particles) that fly in from a screen edge to a
+random **depth** on the web and stick to the nearest thread, struggling (which shakes the
+web) with a decaying amplitude. The spider runs a small state machine:
+
+```
+descend → toCenter → waiting → approaching → wrapping → carrying → feeding → (drop) → waiting
+```
+
+Cocoon wrap time scales with prey size (**4–8 s**); feeding is a timed hold (no shrink).
+Prey priority is modelled on real behaviour:
+
+- always drawn to the **newest** stuck insect;
+- interrupting a wrap **keeps that prey's partial progress** (it's finished later);
+- **carrying a cocoon to the hub is non-interruptible**;
+- **feeding is interruptible** — the spider drops the cocoon to hunt fresh prey, then comes
+  back to finish feeding (catching always outranks feeding).
+
+## Status & roadmap
+
+**Done**
+
+- Procedural web generator on verlet-js, biologically-tuned silk hierarchy, free zone,
+  strengthening spiral, pure-black presentation.
+- Black-widow spider: head-down dragline descent → return to hub → wait.
+- Full prey lifecycle (arrive → stick → struggle → approach → wrap → carry → feed → drop).
+- Multi-prey priority/interruption logic (newest-first, retained partial wrap,
+  non-interruptible carry, resumable feeding).
+- Mouse interaction: drag threads/spider, pluck insects, tear the spider off the web with
+  graceful crawl-back recovery.
+- Stable ≥4-feet gait; softer grips so crawling yanks the web less.
+
+**Future optimization directions**
+
+- **True alternating tetrapod gait** — a visible 4-up / 4-down swing cycle for more lifelike
+  walking (current gait guarantees ≥4 feet down but doesn't animate the swing phase).
+- **Visible silk-spinning** while wrapping — strands drawn from the spinnerets around the prey.
+- **Less carry-time web distortion** — further tuning of grip stiffness / body coupling.
+- **Web damage & repair** — heavy prey tears threads; the spider re-spins them.
+- **Performance** — spatial hashing for `nearestWebParticle`/`nearestWebTo` (currently linear
+  scans of ~500 particles per query) to scale to bigger/denser webs and more insects.
+- **Prey variety** — escaping/struggling-free prey, species-specific speed & size, and a
+  small on-screen controls panel (sliders for density, gravity, spawn rate, etc.).
+- **Touch / mobile support** and an optional dew-droplet / glow aesthetic.
 
 ## Project structure
 
