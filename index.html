@@ -532,7 +532,7 @@
     var ang = Math.random() * 6.283, rad = (0.15 + Math.random() * 0.85) * Math.min(W, H) * 0.3;
     var spec = BUG_SPEC[type];
     var size = 0.8 + Math.random() * 0.6;                 // size variation -> depth / spatial feel
-    var wrapSecs = (4 + ((size - 0.8) / 0.6) * 4) / 1.5;  // wrap 50% faster -> ~2.7s..5.3s by size
+    var wrapSecs = 4 + ((size - 0.8) / 0.6) * 4;          // wrap time scales with prey size: 4s..8s
     bugs.push({
       type: type, x: x, y: y,
       tx: W / 2 + Math.cos(ang) * rad, ty: H / 2 + Math.sin(ang) * rad,
@@ -818,7 +818,7 @@
   var wrapPhase = 0;
   function updateWrapLegs(sc, cx, cy) {
     var sp = sim.composites[1], back = [6, 7];
-    wrapPhase += 0.42;   // hind-leg silk fling +50%
+    wrapPhase += 0.28;
     for (var i = 0; i < 2; i++) {
       var leg = sp.legs[back[i]];
       dropLegGrip(sp, leg);            // free the hind foot so it can sweep, not anchored to a thread
@@ -863,7 +863,7 @@
   function tetrapodStep(tx, ty) {
     var sp = sim.composites[1], thorax = sp.particles[0].pos, sc = sp.scale || 1;
     var dx = tx - thorax.x, dy = ty - thorax.y, d = Math.sqrt(dx * dx + dy * dy) || 1, ux = dx / d, uy = dy / d;
-    var reach = 120 * sc, stride = 51 * sc, SWING = 9, a, leg, best;   // stride +50% -> faster crawl
+    var reach = 120 * sc, stride = 34 * sc, SWING = 9, a, leg, best;
     gaitClock++;
     if (gaitClock % SWING === 0) {                    // swap stance/swing
       stanceSet ^= 1;
@@ -880,7 +880,7 @@
       leg = sp.legs[stance[a]];
       if (!legGripped(sp, leg)) { best = nearestWebTo(leg.pos.x, leg.pos.y, reach); if (best) { var g2 = new DistanceConstraint(leg, best, 0.6, 0); g2.isGrip = true; sp.constraints.push(g2); } }
     }
-    thorax.x += ux * 0.525; thorax.y += uy * 0.525;   // body assist +50% -> faster crawl
+    thorax.x += ux * 0.35; thorax.y += uy * 0.35;     // small assist for smooth progress
   }
 
   function updateSpider() {
@@ -962,7 +962,7 @@
       holdNear(t.cx, t.cy); stationary = true;
       t.held = true;
       var mpF = mouthPos(sp); t.x = mpF.x; t.y = mpF.y;   // held up to the mouth while feeding, not parked below
-      t.feed = Math.min(1, t.feed + 0.00525);   // feed rate +50% -> ~3.2s
+      t.feed = Math.min(1, t.feed + 0.0035);
       if (t.feed >= 1) { t.held = false; t.state = "dropping"; t.vy = 0; t.fvx = (Math.random() - 0.5) * 1; spiderTarget = null; spiderState = "waiting"; }
 
     } else {
