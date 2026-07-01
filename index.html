@@ -507,7 +507,7 @@
       speed: spec.speed, wobble: spec.wobble, ang: 0, phase: Math.random() * 6.283,
       size: size, wrapRate: 1 / (wrapSecs * 60),          // per-frame (~60fps) cocoon growth
       id: ++bugSeq,                       // arrival order (for "newest prey" targeting)
-      t: 0, state: "arriving", anchor: null, struggle: 1, wrap: 0, feed: 0
+      t: 0, state: "arriving", anchor: null, struggle: 1, wrap: 0, feed: 0, held: false
     });
   }
 
@@ -547,8 +547,10 @@
           b.anchor.pos.y += (Math.random() - 0.5) * amp;
           b.struggle *= 0.992;
         }
-      } else if (b.state === "feeding") {             // cocoon rests at its centre spot (even if left)
-        if (b.cx != null) { b.x = b.cx; b.y = b.cy; }
+      } else if (b.state === "feeding") {
+        // held in the spider's mouth: updateSpider positions it each frame (mouthPos).
+        // left behind while the spider hunts fresh prey: park it at its centre spot.
+        if (!b.held && b.cx != null) { b.x = b.cx; b.y = b.cy; }
       } else if (b.state === "dropping") {            // drained husk falls and fades
         b.vy = (b.vy || 0) + 0.25; b.y += b.vy; b.x += (b.fvx || 0);
         b.drop = (b.drop || 0) + 0.02;
@@ -750,6 +752,14 @@
     }
   }
 
+  // point just beyond the head (chelicerae/mouth), where carried prey should visually hang
+  function mouthPos(sp) {
+    var th = sp.thorax.pos, hd = sp.head.pos, sc = sp.scale || 1;
+    var dx = hd.x - th.x, dy = hd.y - th.y, d = Math.sqrt(dx * dx + dy * dy) || 1;
+    var ext = 4 * sc;
+    return { x: hd.x + dx / d * ext, y: hd.y + dy / d * ext };
+  }
+
   // gentle clutch toward a point (used while wrapping / feeding)
   function holdNear(x, y) {
     var th = sim.composites[1].particles[0].pos, dx = x - th.x, dy = y - th.y, d = Math.sqrt(dx * dx + dy * dy) || 1;
@@ -806,7 +816,7 @@
     if (spiderGrabbed()) {
       detachStretchedGrips(sp, 40);   // pulled feet let go one by one -> spider tears off the web
       if ((spiderState === "carrying" || spiderState === "feeding") && spiderTarget) {
-        spiderTarget.x = thorax.x; spiderTarget.y = thorax.y;
+        var mpG = mouthPos(sp); spiderTarget.x = mpG.x; spiderTarget.y = mpG.y;
       }
       return;
     }
@@ -853,7 +863,8 @@
       t = spiderTarget;
       if (!t || t.state !== "carried") { spiderTarget = null; spiderState = "toCenter"; return; }
       tetrapodStep(hub.x, hub.y);
-      t.x = thorax.x; t.y = thorax.y;
+      t.held = true;
+      var mpC = mouthPos(sp); t.x = mpC.x; t.y = mpC.y;   // carried in the chelicerae, not floating at the body centre
       if (Math.hypot(thorax.x - hub.x, thorax.y - hub.y) < 46) {
         t.state = "feeding"; t.cx = hub.x + (Math.random() - 0.5) * 20; t.cy = hub.y + (Math.random() - 0.5) * 20;
         spiderState = "feeding";
@@ -869,10 +880,12 @@
     } else if (spiderState === "feeding") {
       t = spiderTarget;
       if (!t || t.state !== "feeding") { spiderTarget = null; spiderState = "waiting"; return; }
-      if (bestPrey()) { spiderTarget = bestPrey(); spiderState = "approaching"; return; }   // drop cocoon, hunt; resume later
+      if (bestPrey()) { t.held = false; spiderTarget = bestPrey(); spiderState = "approaching"; return; }   // drop cocoon, hunt; resume later
       holdNear(t.cx, t.cy); stationary = true;
+      t.held = true;
+      var mpF = mouthPos(sp); t.x = mpF.x; t.y = mpF.y;   // held up to the mouth while feeding, not parked below
       t.feed = Math.min(1, t.feed + 0.0035);
-      if (t.feed >= 1) { t.state = "dropping"; t.vy = 0; t.fvx = (Math.random() - 0.5) * 1; spiderTarget = null; spiderState = "waiting"; }
+      if (t.feed >= 1) { t.held = false; t.state = "dropping"; t.vy = 0; t.fvx = (Math.random() - 0.5) * 1; spiderTarget = null; spiderState = "waiting"; }
 
     } else {
       spiderState = "toCenter";
