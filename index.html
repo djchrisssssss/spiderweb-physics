@@ -698,6 +698,26 @@
     if (best) { dropLegGrip(sp, leg); var g = new DistanceConstraint(leg, best, 0.5, 0); g.isGrip = true; sp.constraints.push(g); }
   }
 
+  function legGripped(sp, leg) {
+    for (var j = 0; j < sp.constraints.length; j++) {
+      var c = sp.constraints[j];
+      if (c.isGrip && c.a === leg) return true;
+    }
+    return false;
+  }
+
+  // keep at least `min` feet on the web at all times (support legs), so the stance is stable
+  // and never looks sparse; ungripped legs are planted softly on the nearest thread under them
+  function groundLegs(min) {
+    var sp = sim.composites[1]; if (!sp) return;
+    var sc = sp.scale || 1, reach = 120 * sc, cnt = 0, need = [];
+    for (var k = 0; k < 8; k++) { if (legGripped(sp, sp.legs[k])) cnt++; else need.push(k); }
+    for (var i = 0; i < need.length && cnt < min; i++) {
+      var leg = sp.legs[need[i]], best = nearestWebTo(leg.pos.x, leg.pos.y, reach);
+      if (best) { var g = new DistanceConstraint(leg, best, 0.3, 0); g.isGrip = true; sp.constraints.push(g); cnt++; }
+    }
+  }
+
   // gentle clutch toward a point (used while wrapping / feeding)
   function holdNear(x, y) {
     var th = sim.composites[1].particles[0].pos, dx = x - th.x, dy = y - th.y, d = Math.sqrt(dx * dx + dy * dy) || 1;
@@ -800,7 +820,8 @@
       spiderState = "toCenter";
     }
 
-    releaseOverstretched();   // never let a foot stay dragged taut -> clean stance, no jitter
+    releaseOverstretched();   // first drop any foot dragged taut -> clean stance, no jitter
+    groundLegs(4);            // then top up to >=4 feet on the web (stable, non-sparse stance)
   }
 
   var legIndex = 0;
