@@ -736,6 +736,33 @@
     return false;
   }
 
+  // alternating tetrapod gait: two diagonal sets of 4 legs. One set is planted (stance) and
+  // pulls the body along; the other is lifted (swing). They swap every SWING frames, so 4
+  // feet are always down and the swing legs step ahead toward the goal -> lifelike walking.
+  var GAIT_SETS = [[0, 3, 4, 7], [1, 2, 5, 6]], stanceSet = 0, gaitClock = 0;
+  function tetrapodStep(tx, ty) {
+    var sp = sim.composites[1], thorax = sp.particles[0].pos, sc = sp.scale || 1;
+    var dx = tx - thorax.x, dy = ty - thorax.y, d = Math.sqrt(dx * dx + dy * dy) || 1, ux = dx / d, uy = dy / d;
+    var reach = 120 * sc, stride = 34 * sc, SWING = 9, a, leg, best;
+    gaitClock++;
+    if (gaitClock % SWING === 0) {                    // swap stance/swing
+      stanceSet ^= 1;
+      var nStance = GAIT_SETS[stanceSet], nSwing = GAIT_SETS[stanceSet ^ 1];
+      for (a = 0; a < 4; a++) {                        // new stance legs plant AHEAD -> pull the body forward
+        leg = sp.legs[nStance[a]]; dropLegGrip(sp, leg);
+        best = nearestWebTo(leg.pos.x + ux * stride, leg.pos.y + uy * stride, reach);
+        if (best) { var g = new DistanceConstraint(leg, best, 0.75, 0); g.isGrip = true; sp.constraints.push(g); }
+      }
+      for (a = 0; a < 4; a++) dropLegGrip(sp, sp.legs[nSwing[a]]);   // new swing legs lift off
+    }
+    var stance = GAIT_SETS[stanceSet];                // keep the stance set planted if any slipped
+    for (a = 0; a < 4; a++) {
+      leg = sp.legs[stance[a]];
+      if (!legGripped(sp, leg)) { best = nearestWebTo(leg.pos.x, leg.pos.y, reach); if (best) { var g2 = new DistanceConstraint(leg, best, 0.6, 0); g2.isGrip = true; sp.constraints.push(g2); } }
+    }
+    thorax.x += ux * 0.35; thorax.y += uy * 0.35;     // small assist for smooth progress
+  }
+
   function updateSpider() {
     if (!spiderOn) return;
     var sp = sim.composites[1]; if (!sp) return;
@@ -758,26 +785,25 @@
       thorax.x += rdx / rd * 1.5; thorax.y += rdy / rd * 1.5;
     }
 
-    stepClock++;
-    var doStep = (stepClock % 5 === 0), t;   // leg cadence
+    var t, stationary = false;
 
     if (spiderState === "toCenter") {
-      if (doStep) legStepToward(hub.x, hub.y);
+      tetrapodStep(hub.x, hub.y);
       if (Math.hypot(thorax.x - hub.x, thorax.y - hub.y) < 45) spiderState = "waiting";
 
     } else if (spiderState === "waiting") {
+      stationary = true;
       var bp = bestPrey();
       if (bp) { spiderTarget = bp; spiderState = "approaching"; }          // catch first (newest)
       else { var pc = pendingCocoon(); if (pc) { spiderTarget = pc; spiderState = "toFeed"; }  // then feed leftovers
              else if (!hasGrip(sp)) spiderState = "toCenter"; }            // torn off and idle -> crawl back
-      if (doStep) settleStep();                                            // keep feet under the body
 
     } else if (spiderState === "approaching") {
       var bp2 = bestPrey();
       if (!bp2) { spiderTarget = null; spiderState = "toCenter"; return; }
       if (bp2 !== spiderTarget) spiderTarget = bp2;        // always chase the newest catchable prey
       t = spiderTarget;
-      if (doStep) legStepToward(t.x, t.y);
+      tetrapodStep(t.x, t.y);
       if (Math.hypot(thorax.x - t.x, thorax.y - t.y) < 44 * sc) { t.state = "wrapping"; spiderState = "wrapping"; }
 
     } else if (spiderState === "wrapping") {
@@ -785,15 +811,14 @@
       if (!t || t.state !== "wrapping") { spiderTarget = null; spiderState = "toCenter"; return; }
       var newer = bestPrey();                              // a NEWER prey lures it away (partial wrap kept)
       if (newer && newer.id > t.id) { spiderTarget = newer; spiderState = "approaching"; return; }
-      holdNear(t.x, t.y);                                  // settle gently onto the prey
-      if (doStep) settleStep();                            // gather the legs around the prey (no taut stance)
+      holdNear(t.x, t.y); stationary = true;               // settle gently onto the prey
       t.wrap = Math.min(1, t.wrap + (t.wrapRate || 0.006));
       if (t.wrap >= 1) { t.state = "carried"; t.anchor = null; spiderState = "carrying"; }
 
     } else if (spiderState === "carrying") {               // NON-interruptible: haul to the centre
       t = spiderTarget;
       if (!t || t.state !== "carried") { spiderTarget = null; spiderState = "toCenter"; return; }
-      if (doStep) legStepToward(hub.x, hub.y);
+      tetrapodStep(hub.x, hub.y);
       t.x = thorax.x; t.y = thorax.y;
       if (Math.hypot(thorax.x - hub.x, thorax.y - hub.y) < 46) {
         t.state = "feeding"; t.cx = hub.x + (Math.random() - 0.5) * 20; t.cy = hub.y + (Math.random() - 0.5) * 20;
@@ -804,15 +829,14 @@
       t = spiderTarget;
       if (!t || t.state !== "feeding") { spiderTarget = null; spiderState = "waiting"; return; }
       if (bestPrey()) { spiderTarget = bestPrey(); spiderState = "approaching"; return; }   // fresh prey first
-      if (doStep) legStepToward(t.cx, t.cy);
+      tetrapodStep(t.cx, t.cy);
       if (Math.hypot(thorax.x - t.cx, thorax.y - t.cy) < 44) spiderState = "feeding";
 
     } else if (spiderState === "feeding") {
       t = spiderTarget;
       if (!t || t.state !== "feeding") { spiderTarget = null; spiderState = "waiting"; return; }
       if (bestPrey()) { spiderTarget = bestPrey(); spiderState = "approaching"; return; }   // drop cocoon, hunt; resume later
-      holdNear(t.cx, t.cy);
-      if (doStep) settleStep();
+      holdNear(t.cx, t.cy); stationary = true;
       t.feed = Math.min(1, t.feed + 0.0035);
       if (t.feed >= 1) { t.state = "dropping"; t.vy = 0; t.fvx = (Math.random() - 0.5) * 1; spiderTarget = null; spiderState = "waiting"; }
 
@@ -820,8 +844,8 @@
       spiderState = "toCenter";
     }
 
-    releaseOverstretched();   // first drop any foot dragged taut -> clean stance, no jitter
-    groundLegs(4);            // then top up to >=4 feet on the web (stable, non-sparse stance)
+    releaseOverstretched();               // drop any foot dragged taut -> clean stance
+    if (stationary) groundLegs(8);        // at rest: settle all 8 feet down naturally
   }
 
   var legIndex = 0;
