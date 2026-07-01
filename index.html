@@ -436,7 +436,7 @@
       drag = {
         phase: "descend",
         anchor: { x: spider.abdomen.pos.x, y: spider.abdomen.pos.y },
-        length: 0, payout: 3,
+        length: 0, payout: 3.6,   // silk pay-out rate caps descent speed -> ~3s to reach the hub
         mode: Math.random() < 0.5 ? "drift" : "fall",   // what the silk does after landing
         pts: null, life: 1, age: 0
       };
@@ -455,7 +455,7 @@
       drag.length += drag.payout;
       // web gravity is tiny (taut web), so add a uniform extra downward pull to the whole
       // spider for a paced fall. Uniform => no torque => the head-down orientation is preserved.
-      for (var pi = 0; pi < sp.particles.length; pi++) sp.particles[pi].lastPos.y -= 0.03;
+      for (var pi = 0; pi < sp.particles.length; pi++) sp.particles[pi].lastPos.y -= 0.11;  // faster descent (~3s target)
       var ab = sp.abdomen, dx = ab.pos.x - drag.anchor.x, dy = ab.pos.y - drag.anchor.y;
       var d = Math.sqrt(dx * dx + dy * dy) || 1e-6;
       if (d > drag.length) { var f = (d - drag.length) / d; ab.pos.x -= dx * f; ab.pos.y -= dy * f; }  // silk can't over-stretch
@@ -514,10 +514,10 @@
   var heldBug = null;   // an insect currently grabbed by the mouse
   var BUG_TYPES = ["fly", "moth", "mosquito", "roach"];
   var BUG_SPEC = {
-    fly:      { speed: 6.0, wobble: 3.4 },
-    moth:     { speed: 3.0, wobble: 1.3 },
-    mosquito: { speed: 2.4, wobble: 1.6 },   // erratic, hovering flight -- ants can't fly at all
-    roach:    { speed: 4.6, wobble: 1.5 }
+    fly:      { speed: 9.0, wobble: 3.4 },    // flight speeds +50%
+    moth:     { speed: 4.5, wobble: 1.3 },
+    mosquito: { speed: 3.6, wobble: 1.6 },   // erratic, hovering flight -- ants can't fly at all
+    roach:    { speed: 6.9, wobble: 1.5 }
   };
 
   function spawnBug(type) {
@@ -532,7 +532,7 @@
     var ang = Math.random() * 6.283, rad = (0.15 + Math.random() * 0.85) * Math.min(W, H) * 0.3;
     var spec = BUG_SPEC[type];
     var size = 0.8 + Math.random() * 0.6;                 // size variation -> depth / spatial feel
-    var wrapSecs = 4 + ((size - 0.8) / 0.6) * 4;          // wrap time scales with prey size: 4s..8s
+    var wrapSecs = (4 + ((size - 0.8) / 0.6) * 4) / 1.5;  // wrap 50% faster -> ~2.7s..5.3s by size
     bugs.push({
       type: type, x: x, y: y,
       tx: W / 2 + Math.cos(ang) * rad, ty: H / 2 + Math.sin(ang) * rad,
@@ -818,7 +818,7 @@
   var wrapPhase = 0;
   function updateWrapLegs(sc, cx, cy) {
     var sp = sim.composites[1], back = [6, 7];
-    wrapPhase += 0.28;
+    wrapPhase += 0.42;   // hind-leg silk fling +50%
     for (var i = 0; i < 2; i++) {
       var leg = sp.legs[back[i]];
       dropLegGrip(sp, leg);            // free the hind foot so it can sweep, not anchored to a thread
@@ -863,7 +863,7 @@
   function tetrapodStep(tx, ty) {
     var sp = sim.composites[1], thorax = sp.particles[0].pos, sc = sp.scale || 1;
     var dx = tx - thorax.x, dy = ty - thorax.y, d = Math.sqrt(dx * dx + dy * dy) || 1, ux = dx / d, uy = dy / d;
-    var reach = 120 * sc, stride = 34 * sc, SWING = 9, a, leg, best;
+    var reach = 120 * sc, stride = 51 * sc, SWING = 9, a, leg, best;   // stride +50% -> faster crawl
     gaitClock++;
     if (gaitClock % SWING === 0) {                    // swap stance/swing
       stanceSet ^= 1;
@@ -880,7 +880,7 @@
       leg = sp.legs[stance[a]];
       if (!legGripped(sp, leg)) { best = nearestWebTo(leg.pos.x, leg.pos.y, reach); if (best) { var g2 = new DistanceConstraint(leg, best, 0.6, 0); g2.isGrip = true; sp.constraints.push(g2); } }
     }
-    thorax.x += ux * 0.35; thorax.y += uy * 0.35;     // small assist for smooth progress
+    thorax.x += ux * 0.525; thorax.y += uy * 0.525;   // body assist +50% -> faster crawl
   }
 
   function updateSpider() {
@@ -962,7 +962,7 @@
       holdNear(t.cx, t.cy); stationary = true;
       t.held = true;
       var mpF = mouthPos(sp); t.x = mpF.x; t.y = mpF.y;   // held up to the mouth while feeding, not parked below
-      t.feed = Math.min(1, t.feed + 0.0035);
+      t.feed = Math.min(1, t.feed + 0.00525);   // feed rate +50% -> ~3.2s
       if (t.feed >= 1) { t.held = false; t.state = "dropping"; t.vy = 0; t.fvx = (Math.random() - 0.5) * 1; spiderTarget = null; spiderState = "waiting"; }
 
     } else {
