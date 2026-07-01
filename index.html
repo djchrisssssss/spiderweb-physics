@@ -318,35 +318,67 @@
     spider.drawParticles = function() {};
     spider.drawConstraints = function(ctx, composite) {
       var i, sc = composite.scale || 1;
-      // --- legs: glossy black with a faint rim so the silhouette reads on a pure-black bg ---
+      var ab = spider.abdomen.pos, th = spider.thorax.pos, hd = spider.head.pos;
+
+      // --- soft contact shadow under the body (grounds it on the web, implies light upper-left) ---
+      var midx = (hd.x + th.x + ab.x) / 3, midy = (hd.y + th.y + ab.y) / 3;
+      var bodyAng = Math.atan2(ab.y - hd.y, ab.x - hd.x);
+      ctx.save();
+      ctx.translate(midx + 2.2 * sc, midy + 3 * sc);
+      ctx.rotate(bodyAng);
+      ctx.scale(1.15, 0.5);
+      var shG = ctx.createRadialGradient(0, 0, 0, 0, 0, 11 * sc);
+      shG.addColorStop(0, "rgba(0,0,0,0.55)"); shG.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.beginPath(); ctx.arc(0, 0, 11 * sc, 0, 2 * Math.PI); ctx.fillStyle = shG; ctx.fill();
+      ctx.restore();
+
+      // --- legs: tapered capsule segments with a cylindrical highlight + joint knuckles ---
+      function legSeg(p1, p2, w) {
+        var dx = p2.x - p1.x, dy = p2.y - p1.y, len = Math.sqrt(dx * dx + dy * dy) || 1;
+        var nx = -dy / len, ny = dx / len, w2 = w * 0.55;
+        ctx.beginPath();
+        ctx.moveTo(p1.x + nx * w, p1.y + ny * w);
+        ctx.lineTo(p2.x + nx * w2, p2.y + ny * w2);
+        ctx.lineTo(p2.x - nx * w2, p2.y - ny * w2);
+        ctx.lineTo(p1.x - nx * w, p1.y - ny * w);
+        ctx.closePath();
+        ctx.fillStyle = "#101013"; ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(p1.x + nx * w * 0.5, p1.y + ny * w * 0.5);
+        ctx.lineTo(p2.x + nx * w2 * 0.5, p2.y + ny * w2 * 0.5);
+        ctx.strokeStyle = "rgba(150,155,168,0.4)"; ctx.lineWidth = Math.max(0.4, w * 0.35); ctx.stroke();
+        ctx.beginPath(); ctx.arc(p1.x, p1.y, w * 0.9, 0, 2 * Math.PI); ctx.fillStyle = "#0a0a0d"; ctx.fill();
+      }
       for (i = 3; i < composite.constraints.length; ++i) {
         var c = composite.constraints[i];
         if (!(c instanceof DistanceConstraint)) continue;
-        ctx.beginPath(); ctx.moveTo(c.a.pos.x, c.a.pos.y); ctx.lineTo(c.b.pos.x, c.b.pos.y);
         var lw = 1.2;
         if ((i >= 2 && i <= 4) || (i >= 19 && i <= 20) || (i >= 35 && i <= 36) || (i >= 51 && i <= 52)) lw = 3;
         else if ((i >= 4 && i <= 6) || (i >= 21 && i <= 22) || (i >= 37 && i <= 38) || (i >= 53 && i <= 54)) lw = 2;
-        ctx.strokeStyle = "#3a3a40"; ctx.lineWidth = Math.max(0.9, lw * sc * 1.5); ctx.stroke();
+        legSeg(c.a.pos, c.b.pos, Math.max(0.6, lw * sc * 0.75));
       }
-      // --- body: glossy black widow, dark fill + subtle rim light + specular highlight ---
+
+      // --- body: sphere-shaded beads (radial gradient) instead of flat fills ---
       function bead(p, r) {
+        var g = ctx.createRadialGradient(p.x - r * 0.35, p.y - r * 0.4, r * 0.1, p.x, p.y, r * 1.05);
+        g.addColorStop(0, "rgba(165,170,182,0.95)"); g.addColorStop(0.3, "#1a1a1e"); g.addColorStop(1, "#020203");
         ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, 2 * Math.PI);
-        ctx.fillStyle = "#0a0a0c"; ctx.fill();
-        ctx.lineWidth = 0.8 * sc; ctx.strokeStyle = "rgba(120,124,134,0.55)"; ctx.stroke();
-        ctx.beginPath(); ctx.arc(p.x - r * 0.3, p.y - r * 0.35, r * 0.28, 0, 2 * Math.PI);
-        ctx.fillStyle = "rgba(190,195,205,0.5)"; ctx.fill();   // specular sheen
+        ctx.fillStyle = g; ctx.fill();
+        ctx.lineWidth = 0.6 * sc; ctx.strokeStyle = "rgba(110,114,124,0.4)"; ctx.stroke();
       }
-      var ab = spider.abdomen.pos, th = spider.thorax.pos;
-      bead(spider.head.pos, 4 * sc);
+      bead(hd, 4 * sc);
       bead(th, 4 * sc);
       bead(ab, 8 * sc);
-      // --- red hourglass on the abdomen, aligned with the body axis ---
+
+      // --- red hourglass on the abdomen, aligned with the body axis (glossy gradient) ---
       var ang = Math.atan2(ab.y - th.y, ab.x - th.x);
       var al = { x: Math.cos(ang), y: Math.sin(ang) };          // along body
       var pe = { x: -Math.sin(ang), y: Math.cos(ang) };         // perpendicular
       var L = 5.5 * sc, Wd = 3.6 * sc;
       function pt(d, w) { return { x: ab.x + al.x * d + pe.x * w, y: ab.y + al.y * d + pe.y * w }; }
-      ctx.fillStyle = "#d61f2b";
+      var hg = ctx.createLinearGradient(ab.x - al.x * L, ab.y - al.y * L, ab.x + al.x * L, ab.y + al.y * L);
+      hg.addColorStop(0, "#ff5c52"); hg.addColorStop(0.5, "#a80f16"); hg.addColorStop(1, "#ff5c52");
+      ctx.fillStyle = hg;
       var t1a = pt(L, Wd), t1b = pt(L, -Wd);                    // tail-side triangle
       ctx.beginPath(); ctx.moveTo(ab.x, ab.y); ctx.lineTo(t1a.x, t1a.y); ctx.lineTo(t1b.x, t1b.y); ctx.closePath(); ctx.fill();
       var t2a = pt(-L, Wd), t2b = pt(-L, -Wd);                  // head-side triangle
@@ -560,35 +592,72 @@
     }
   }
 
+  // shared shading helpers for insect bodies: a radial-gradient "sphere" fill and a soft
+  // contact shadow, giving flat silhouettes a rounded, slightly 3D look
+  function shadeEllipse(ctx, cx, cy, rx, ry, hi, lo) {
+    var g = ctx.createRadialGradient(cx - rx * 0.35, cy - ry * 0.4, Math.min(rx, ry) * 0.12, cx, cy, Math.max(rx, ry) * 1.05);
+    g.addColorStop(0, hi); g.addColorStop(1, lo);
+    ctx.beginPath(); ctx.ellipse(cx, cy, rx, ry, 0, 0, 6.283); ctx.fillStyle = g; ctx.fill();
+  }
+  function softShadow(ctx, cx, cy, rx, ry) {
+    var g = ctx.createRadialGradient(cx + 0.6, cy + 0.9, 0, cx + 0.6, cy + 0.9, Math.max(rx, ry) * 1.3);
+    g.addColorStop(0, "rgba(0,0,0,0.45)"); g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.beginPath(); ctx.ellipse(cx + 0.6, cy + 0.9, rx * 1.1, ry * 0.85, 0, 0, 6.283); ctx.fillStyle = g; ctx.fill();
+  }
+
   function drawBugShape(ctx, type) {
     if (type === "fly") {
-      ctx.fillStyle = "rgba(205,212,224,0.45)";
-      ctx.beginPath(); ctx.ellipse(-2, -3.5, 6, 3, -0.5, 0, 6.283); ctx.fill();
-      ctx.beginPath(); ctx.ellipse(-2, 3.5, 6, 3, 0.5, 0, 6.283); ctx.fill();
-      ctx.fillStyle = "#202329";
-      ctx.beginPath(); ctx.ellipse(0, 0, 5.5, 2.6, 0, 0, 6.283); ctx.fill();
-      ctx.fillStyle = "#0c0d10"; ctx.beginPath(); ctx.arc(4.5, 0, 2, 0, 6.283); ctx.fill();
+      softShadow(ctx, 0, 0, 6, 4);
+      ctx.fillStyle = "rgba(210,220,235,0.35)";                 // translucent, slightly curved wings
+      ctx.beginPath(); ctx.moveTo(-1, -1); ctx.quadraticCurveTo(-9, -9, -13, -2); ctx.quadraticCurveTo(-7, -2, -1, -1); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(-1, 1); ctx.quadraticCurveTo(-9, 9, -13, 2); ctx.quadraticCurveTo(-7, 2, -1, 1); ctx.closePath(); ctx.fill();
+      shadeEllipse(ctx, 0, 0, 5.5, 2.7, "#4a5568", "#08090a");   // glossy body
+      shadeEllipse(ctx, 4.2, -1.3, 1.8, 1.8, "#d35450", "#3a0d08");   // compound eyes
+      shadeEllipse(ctx, 4.2, 1.3, 1.8, 1.8, "#d35450", "#3a0d08");
+      ctx.fillStyle = "rgba(255,255,255,0.55)";
+      ctx.beginPath(); ctx.arc(4.7, -1.8, 0.4, 0, 6.283); ctx.fill();
+      ctx.beginPath(); ctx.arc(4.7, 0.8, 0.4, 0, 6.283); ctx.fill();
     } else if (type === "moth") {
-      ctx.fillStyle = "rgba(150,140,118,0.85)";
-      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-12, -11); ctx.lineTo(-13, 0); ctx.closePath(); ctx.fill();
-      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-12, 11); ctx.lineTo(-13, 0); ctx.closePath(); ctx.fill();
-      ctx.fillStyle = "rgba(176,166,142,0.9)";
-      ctx.beginPath(); ctx.moveTo(2, 0); ctx.lineTo(10, -8); ctx.lineTo(11, 0); ctx.closePath(); ctx.fill();
-      ctx.beginPath(); ctx.moveTo(2, 0); ctx.lineTo(10, 8); ctx.lineTo(11, 0); ctx.closePath(); ctx.fill();
-      ctx.fillStyle = "#4a4334"; ctx.beginPath(); ctx.ellipse(-2, 0, 5, 2.6, 0, 0, 6.283); ctx.fill();
+      softShadow(ctx, -2, 0, 11, 8);
+      var wing = function(sy) {
+        ctx.beginPath();
+        ctx.moveTo(1, 0);
+        ctx.quadraticCurveTo(-4, 9 * sy, -13, 8 * sy);
+        ctx.quadraticCurveTo(-9, 2 * sy, 1, 0);
+        ctx.closePath();
+        var wg = ctx.createLinearGradient(1, 0, -13, 8 * sy);
+        wg.addColorStop(0, "rgba(176,164,138,0.95)"); wg.addColorStop(1, "rgba(120,108,86,0.85)");
+        ctx.fillStyle = wg; ctx.fill();
+      };
+      wing(-1); wing(1);
+      shadeEllipse(ctx, -2, 0, 5.2, 2.6, "#5c5442", "#1c1a13");
+      ctx.strokeStyle = "#2a2720"; ctx.lineWidth = 0.35;         // feeler antennae
+      ctx.beginPath(); ctx.moveTo(2, -1); ctx.quadraticCurveTo(6, -4, 8, -3.5); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(2, 1); ctx.quadraticCurveTo(6, 4, 8, 3.5); ctx.stroke();
     } else if (type === "ant") {
-      ctx.strokeStyle = "#3a2520"; ctx.lineWidth = 0.8;
-      for (var k = -1; k <= 1; k++) { ctx.beginPath(); ctx.moveTo(-2, 0); ctx.lineTo(-2 + k * 3, (k === 0 ? 5 : 4) * (Math.random() > .5 ? 1 : 1)); ctx.stroke(); }
-      ctx.fillStyle = "#5a1f18";
-      ctx.beginPath(); ctx.arc(-6, 0, 4, 0, 6.283); ctx.fill();   // abdomen
-      ctx.beginPath(); ctx.arc(0, 0, 2.6, 0, 6.283); ctx.fill();  // thorax
-      ctx.beginPath(); ctx.arc(5, 0, 3, 0, 6.283); ctx.fill();    // head
+      softShadow(ctx, 0, 0, 8, 3);
+      ctx.strokeStyle = "#2a1712"; ctx.lineWidth = 0.7;
+      for (var k = -1; k <= 1; k++) { ctx.beginPath(); ctx.moveTo(-2, 0); ctx.lineTo(-2 + k * 3, k === 0 ? 5 : 4); ctx.stroke(); }
+      shadeEllipse(ctx, -6, 0, 4, 4, "#8a3527", "#2e0d08");      // abdomen
+      shadeEllipse(ctx, 0, 0, 2.6, 2.6, "#8a3527", "#2e0d08");   // thorax
+      shadeEllipse(ctx, 5, 0, 3, 3, "#8a3527", "#2e0d08");       // head
+      ctx.strokeStyle = "#3a1a12"; ctx.lineWidth = 0.35;         // antennae
+      ctx.beginPath(); ctx.moveTo(6.5, -0.5); ctx.quadraticCurveTo(9, -2.5, 9.5, -1.5); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(6.5, 0.5); ctx.quadraticCurveTo(9, 2.5, 9.5, 1.5); ctx.stroke();
     } else { // roach
-      ctx.strokeStyle = "#6b4a2a"; ctx.lineWidth = 0.9;
-      ctx.beginPath(); ctx.moveTo(5, -1); ctx.lineTo(12, -5); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(5, 1); ctx.lineTo(12, 5); ctx.stroke();
-      ctx.fillStyle = "#5b3d22"; ctx.beginPath(); ctx.ellipse(0, 0, 8, 4.5, 0, 0, 6.283); ctx.fill();
-      ctx.fillStyle = "#3f2a17"; ctx.beginPath(); ctx.ellipse(4, 0, 3.5, 3.2, 0, 0, 6.283); ctx.fill();
+      softShadow(ctx, 2, 0, 10, 5);
+      ctx.strokeStyle = "#4a3218"; ctx.lineWidth = 0.9;
+      ctx.beginPath(); ctx.moveTo(5, -1); ctx.lineTo(13, -6); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(5, 1); ctx.lineTo(13, 6); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, -2); ctx.lineTo(-6, -5); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, 2); ctx.lineTo(-6, 5); ctx.stroke();
+      shadeEllipse(ctx, 0, 0, 8, 4.5, "#8a6438", "#2a1c0c");     // glossy wing-cases
+      ctx.strokeStyle = "rgba(0,0,0,0.35)"; ctx.lineWidth = 0.3;
+      ctx.beginPath(); ctx.moveTo(-6, 0); ctx.lineTo(6, 0); ctx.stroke();   // suture line
+      shadeEllipse(ctx, 5, 0, 3.5, 3.2, "#6b4a24", "#1c1206");   // head
+      ctx.strokeStyle = "#3a2610"; ctx.lineWidth = 0.35;         // long antennae
+      ctx.beginPath(); ctx.moveTo(7, -1); ctx.quadraticCurveTo(12, -4, 15, -3); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(7, 1); ctx.quadraticCurveTo(12, 4, 15, 3); ctx.stroke();
     }
   }
 
