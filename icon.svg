@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Spiderweb">
+  <rect width="512" height="512" rx="112" fill="#0a0a0d"/>
+  <!-- faint radial hub glow -->
+  <circle cx="256" cy="256" r="210" fill="url(#g)"/>
+  <defs>
+    <radialGradient id="g" cx="50%" cy="46%" r="55%">
+      <stop offset="0" stop-color="#20242c"/>
+      <stop offset="1" stop-color="#0a0a0d"/>
+    </radialGradient>
+  </defs>
+  <!-- legs: four per side, radiating with a bent knee -->
+  <g fill="none" stroke="#c9cdd6" stroke-width="12" stroke-linecap="round">
+    <path d="M256 250 L150 150 L96 178"/>
+    <path d="M256 262 L142 224 L86 250"/>
+    <path d="M256 274 L142 296 L86 330"/>
+    <path d="M256 286 L156 356 L110 402"/>
+    <path d="M256 250 L362 150 L416 178"/>
+    <path d="M256 262 L370 224 L426 250"/>
+    <path d="M256 274 L370 296 L426 330"/>
+    <path d="M256 286 L356 356 L402 402"/>
+  </g>
+  <!-- body: cephalothorax + abdomen -->
+  <circle cx="256" cy="238" r="30" fill="#d5d9e1"/>
+  <circle cx="256" cy="300" r="52" fill="#c9cdd6"/>
+  <!-- red hourglass -->
+  <path d="M256 300 L238 276 L274 276 Z M256 300 L238 324 L274 324 Z" fill="#c8161d"/>
+</svg>

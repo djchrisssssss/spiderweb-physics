@@ -4,12 +4,33 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Spiderweb — gregkepler algorithm × verlet-js physics</title>
+<meta name="description" content="An interactive procedural spider web with a hunting black-widow. Drag the silk, spawn insects, and watch the spider descend, wrap prey into a cocoon, and feed. Vanilla JS + verlet physics, no build step." />
+<meta name="theme-color" content="#000000" />
+<link rel="icon" href="icon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="icon.svg" />
+<link rel="manifest" href="manifest.webmanifest" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black" />
+<meta name="apple-mobile-web-app-title" content="Spiderweb" />
+<!-- Open Graph / Twitter link previews (og:image lives on the currently-live domain) -->
+<meta property="og:type" content="website" />
+<meta property="og:title" content="Spiderweb — generative web × verlet physics" />
+<meta property="og:description" content="An interactive procedural spider web with a hunting black-widow. Drag the silk, spawn insects, watch the spider hunt." />
+<meta property="og:url" content="https://spiderweb-integrated.vercel.app/" />
+<meta property="og:image" content="https://spiderweb-integrated.vercel.app/docs/screenshot.jpg" />
+<meta property="og:image:width" content="800" />
+<meta property="og:image:height" content="563" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Spiderweb — generative web × verlet physics" />
+<meta name="twitter:description" content="An interactive procedural spider web with a hunting black-widow. Drag the silk, spawn insects, watch the spider hunt." />
+<meta name="twitter:image" content="https://spiderweb-integrated.vercel.app/docs/screenshot.jpg" />
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
   #stage {
     display: block;
     background: #000;
     cursor: grab;
+    touch-action: none;   /* let the canvas own touch gestures (drag/pluck), not the page */
   }
   #stage:active { cursor: grabbing; }
   #hud {
@@ -257,35 +278,6 @@
     return composite;
   };
 
-  function shuffle(o) { for (var j, x, i = o.length; i; j = Math.floor(Math.random() * i), x = o[--i], o[i] = o[j], o[j] = x); return o; }
-
-  VerletJS.prototype.crawl = function(leg) {
-    var web = this.composites[0], spider = this.composites[1];
-    if (!spider) return;
-    var sc = spider.scale || 1;
-    var stepRadius = 110 * sc, minStepRadius = 40 * sc;
-    var theta = spider.particles[0].pos.angle2(spider.particles[0].pos.add(new Vec2(1, 0)), spider.particles[1].pos);
-    var b1 = new Vec2(Math.cos(theta), Math.sin(theta));
-    var b2 = new Vec2(Math.cos(theta + Math.PI / 2), Math.sin(theta + Math.PI / 2));
-    var flag1 = leg < 4 ? 1 : -1, flag2 = leg % 2 == 0 ? 1 : 0;
-    var paths = [], i;
-    for (i in web.particles) {
-      if (web.particles[i].pos.sub(spider.particles[0].pos).dot(b1) * flag1 >= 0
-        && web.particles[i].pos.sub(spider.particles[0].pos).dot(b2) * flag2 >= 0) {
-        var d2 = web.particles[i].pos.dist2(spider.particles[0].pos);
-        if (!(d2 >= minStepRadius * minStepRadius && d2 <= stepRadius * stepRadius)) continue;
-        var taken = false, j;
-        for (j in spider.constraints) for (var k = 0; k < 8; ++k)
-          if (spider.constraints[j] instanceof DistanceConstraint && spider.constraints[j].a == spider.legs[k] && spider.constraints[j].b == web.particles[i]) taken = true;
-        if (!taken) paths.push(web.particles[i]);
-      }
-    }
-    for (i in spider.constraints)
-      if (spider.constraints[i] instanceof DistanceConstraint && spider.constraints[i].a == spider.legs[leg]) { spider.constraints.splice(i, 1); break; }
-    // grip the web gently (stiffness 0.25) so the spider disturbs/shakes the web ~75% less
-    if (paths.length > 0) { shuffle(paths); spider.constraints.push(new DistanceConstraint(spider.legs[leg], paths[0], 0.25, 0)); }
-  };
-
   /* ------------------------------ draw styling ------------------------------ */
   function styleWeb(web) {
     web.drawParticles = function() {};   // silk only, no node dots
@@ -303,15 +295,20 @@
       };
       ctx.save();
       ctx.globalAlpha = 0.5;   // render the whole web at 50% opacity
-      var cons = composite.constraints, i;
-      for (i in cons) {
-        var c = cons[i];
-        if (!(c instanceof DistanceConstraint)) continue;
-        var st = styles[c.kind] || styles.bar;
-        ctx.beginPath();
-        ctx.moveTo(c.a.pos.x, c.a.pos.y);
-        ctx.lineTo(c.b.pos.x, c.b.pos.y);
-        ctx.strokeStyle = st.s; ctx.lineWidth = st.w; ctx.stroke();
+      // batch by kind: one beginPath + one stroke per silk type (~840 segments -> 5 strokes),
+      // instead of a beginPath/stroke per segment. Cuts canvas state churn dramatically.
+      var cons = composite.constraints, ncons = cons.length, i;
+      for (var key in styles) {
+        var st = styles[key], started = false;
+        for (i = 0; i < ncons; i++) {
+          var c = cons[i];
+          if (!(c instanceof DistanceConstraint)) continue;
+          if ((c.kind || "bar") !== key) continue;
+          if (!started) { ctx.beginPath(); started = true; }
+          ctx.moveTo(c.a.pos.x, c.a.pos.y);
+          ctx.lineTo(c.b.pos.x, c.b.pos.y);
+        }
+        if (started) { ctx.strokeStyle = st.s; ctx.lineWidth = st.w; ctx.stroke(); }
       }
       // bright dot at the very centre of the hub (where the spider rests)
       if (composite.hub) {
@@ -404,7 +401,8 @@
   var CONFIG = {
     physics: {          // GLOBAL — affects the whole web + spider hang. Change with care.
       gravity: 0.025,   // web sag / spider hang
-      friction: 0.97    // global damping (web bounce, momentum)
+      friction: 0.97,   // global damping (web bounce, momentum)
+      iterations: 20    // constraint-solver relaxation passes per frame; lower = cheaper + softer
     },
     descend: {          // spider silk-drop entrance (~3.6s)
       payout: 2.88,     // silk pay-out rate = descent speed cap (main knob)
@@ -441,6 +439,13 @@
     feedRate: 0.00175   // feeding drain per frame -> feeding time = 1/rate/60 (~9.5s)
   };
 
+  // respect the OS "reduce motion" setting: strongly damp the most involuntary movement --
+  // prey struggling shakes the whole web for seconds -- and calm the insect flight wobble
+  if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    CONFIG.struggle.amp *= 0.25;
+    CONFIG.flight.wobbleFreq *= 0.5;
+  }
+
   /* ------------------------------ app / loop ------------------------------ */
   var canvas = document.getElementById("stage");
   var sim, spiderOn = true;
@@ -452,7 +457,7 @@
     var W = window.innerWidth, H = window.innerHeight;
     // proportional to the web radius (min(W,H)*0.30); 1.0 on desktops, ~0.49 on a phone
     uiScale = Math.max(0.4, Math.min(1, Math.min(W, H) / 800));
-    var dpr = window.devicePixelRatio || 1;
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);   // cap at 2: 3x phones don't need 3x fill for thin silk
     canvas.style.width = W + "px";
     canvas.style.height = H + "px";
     canvas.width = W * dpr;
@@ -465,18 +470,23 @@
     sim.friction = CONFIG.physics.friction;
     sim.selectionRadius = 24;
 
-    var pointNum = 5 + Math.floor(Math.random() * 3);       // 5..7 anchors
-    var raysPer = 5 + Math.floor(Math.random() * 3);        // 5..7 rays per segment (~2x density)
+    // small screens get a sparser web: fewer rays/rings -> ~half the particles, which both
+    // fixes the cramped look on a phone and roughly halves the physics cost there
+    var small = Math.min(W, H) < 640;
+    var pointNum = 5 + Math.floor(Math.random() * 3);                      // 5..7 anchors
+    var raysPer = small ? 3 + Math.floor(Math.random() * 2)                // phone: 3..4 rays/segment
+                        : 5 + Math.floor(Math.random() * 3);               // desktop: 5..7
+    var levels = small ? 10 : 13;                                          // rings per ray
     var radiusBase = Math.min(W, H) * 0.30;
     var web = sim.organicWeb(new Vec2(W / 2, H / 2), {
-      pointNum: pointNum, raysPerSegment: raysPer, levels: 13, radiusBase: radiusBase
+      pointNum: pointNum, raysPerSegment: raysPer, levels: levels, radiusBase: radiusBase
     });
     styleWeb(web);
 
     drag = null;
     bugs = [];
     heldBug = null;
-    spiderState = "descend"; spiderTarget = null; stepClock = 0;
+    spiderState = "descend"; spiderTarget = null;
     if (spiderOn) {
       var spider = sim.spider(new Vec2(W / 2 + (Math.random() - 0.5) * 220, -200), 0.75 * uiScale);  // base size 0.75, shrunk on small viewports
       styleSpider(spider);
@@ -749,7 +759,6 @@
   /* ---------------- spider hunting AI (Phase 2: return to centre, wait, approach) ---------- */
   var spiderState = "descend";   // descend -> toCenter -> waiting -> approaching -> atPrey
   var spiderTarget = null;
-  var stepClock = 0;
 
   // newest catchable prey: stuck, or a partially-wrapped one that was abandoned mid-wrap
   function bestPrey() {
@@ -773,11 +782,56 @@
     return !!(de && sp && sp.particles.indexOf(de) >= 0);
   }
 
+  // --- spatial grid over the web particles, rebuilt once per frame (they move every tick).
+  // The spider queries nearestWebTo() ~8-12x per frame; the grid turns each query from a
+  // linear scan of ~450 particles into a scan of just the cells near the query point. ---
+  var webGrid = { cell: 50, cols: 0, rows: 0, minX: 0, minY: 0, buckets: null };
+  function rebuildWebGrid() {
+    if (!sim || !sim.composites[0]) { webGrid.buckets = null; return; }
+    var ps = sim.composites[0].particles, n = ps.length, cell = webGrid.cell;
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, i, p;
+    for (i = 0; i < n; i++) {
+      p = ps[i].pos;
+      if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+    }
+    var cols = Math.max(1, Math.ceil((maxX - minX) / cell) + 1);
+    var rows = Math.max(1, Math.ceil((maxY - minY) / cell) + 1);
+    var buckets = new Array(cols * rows);
+    for (i = 0; i < n; i++) {
+      p = ps[i].pos;
+      var idx = (((p.y - minY) / cell) | 0) * cols + (((p.x - minX) / cell) | 0);
+      (buckets[idx] || (buckets[idx] = [])).push(ps[i]);
+    }
+    webGrid.cols = cols; webGrid.rows = rows; webGrid.minX = minX; webGrid.minY = minY; webGrid.buckets = buckets;
+  }
+
+  // nearest web particle within maxR of (x,y). Scans the k-cell neighbourhood that fully
+  // covers the maxR disk, so it returns exactly what a linear scan would. Falls back to a
+  // linear scan if the grid isn't built yet (e.g. first frame / off-loop test pumps).
   function nearestWebTo(x, y, maxR) {
-    var ps = sim.composites[0].particles, best = null, bd = maxR * maxR;
-    for (var i = 0; i < ps.length; i++) {
-      var dx = ps[i].pos.x - x, dy = ps[i].pos.y - y, d2 = dx * dx + dy * dy;
-      if (d2 < bd) { bd = d2; best = ps[i]; }
+    var g = webGrid, buckets = g.buckets, best = null, bd = maxR * maxR, i, dx, dy, d2;
+    if (!buckets) {
+      var ps = sim.composites[0].particles;
+      for (i = 0; i < ps.length; i++) {
+        dx = ps[i].pos.x - x; dy = ps[i].pos.y - y; d2 = dx * dx + dy * dy;
+        if (d2 < bd) { bd = d2; best = ps[i]; }
+      }
+      return best;
+    }
+    var cell = g.cell, k = Math.ceil(maxR / cell);
+    var cx = ((x - g.minX) / cell) | 0, cy = ((y - g.minY) / cell) | 0;
+    var x0 = Math.max(0, cx - k), x1 = Math.min(g.cols - 1, cx + k);
+    var y0 = Math.max(0, cy - k), y1 = Math.min(g.rows - 1, cy + k);
+    for (var gy = y0; gy <= y1; gy++) {
+      for (var gx = x0; gx <= x1; gx++) {
+        var b = buckets[gy * g.cols + gx];
+        if (!b) continue;
+        for (i = 0; i < b.length; i++) {
+          dx = b[i].pos.x - x; dy = b[i].pos.y - y; d2 = dx * dx + dy * dy;
+          if (d2 < bd) { bd = d2; best = b[i]; }
+        }
+      }
     }
     return best;
   }
@@ -798,39 +852,6 @@
       var c = sp.constraints[j];
       if (c.isGrip && c.a.pos.sub(c.b.pos).length() > max) sp.constraints.splice(j, 1);
     }
-  }
-
-  // directed leg-crawl: plant the next leg on a web point toward the goal; the grip pulls
-  // the body along (this is what moves the spider). A small assist smooths progress.
-  function legStepToward(tx, ty) {
-    var sp = sim.composites[1], web = sim.composites[0], thorax = sp.particles[0].pos;
-    var gdx = tx - thorax.x, gdy = ty - thorax.y, gd = Math.sqrt(gdx * gdx + gdy * gdy) || 1;
-    var gx = gdx / gd, gy = gdy / gd, sc = sp.scale || 1;
-    var reach = 130 * sc, minStep = 28 * sc, best = null, bestScore = -1e9, ps = web.particles;
-    for (var i = 0; i < ps.length; i++) {
-      var dx = ps[i].pos.x - thorax.x, dy = ps[i].pos.y - thorax.y, d2 = dx * dx + dy * dy;
-      if (d2 < minStep * minStep || d2 > reach * reach) continue;
-      var d = Math.sqrt(d2), dot = (dx * gx + dy * gy) / d;
-      if (dot < 0.25) continue;
-      var score = dot + (d / reach) * 0.4;
-      if (score > bestScore) { bestScore = score; best = ps[i]; }
-    }
-    if (best) {
-      var leg = sp.legs[(legIndex++) % 8];
-      dropLegGrip(sp, leg);
-      var g = new DistanceConstraint(leg, best, 0.55, 0); g.isGrip = true; sp.constraints.push(g);
-      thorax.x += gx * 0.2; thorax.y += gy * 0.2;
-    } else {
-      thorax.x += gx * 2; thorax.y += gy * 2;   // off the web -> travel back faster to re-grip
-    }
-  }
-
-  // settle: plant the next leg on the nearest web point under its foot (gathers the legs
-  // around the body so the stance looks natural while wrapping / feeding)
-  function settleStep() {
-    var sp = sim.composites[1], sc = sp.scale || 1, leg = sp.legs[(legIndex++) % 8];
-    var best = nearestWebTo(leg.pos.x, leg.pos.y, 120 * sc);
-    if (best) { dropLegGrip(sp, leg); var g = new DistanceConstraint(leg, best, 0.5, 0); g.isGrip = true; sp.constraints.push(g); }
   }
 
   function legGripped(sp, leg) {
@@ -1028,11 +1049,11 @@
     if (stationary) groundLegs(8);        // at rest: settle all 8 feet down naturally
   }
 
-  var legIndex = 0;
   function loop() {
+    rebuildWebGrid();// index web-particle positions for this frame (spider queries it below)
     updateBugs();    // insects fly in / struggle (struggle perturbs the web)
     updateSpider();  // hunting AI: return to centre, wait, approach newest prey (directed leg-crawl)
-    sim.frame(30);   // physics first
+    sim.frame(CONFIG.physics.iterations);   // physics first
     updateDrag();    // then the silk constraint / phase logic (final positional step)
     sim.draw();
     drawDrag();      // dragline drawn on top of the web
@@ -1041,10 +1062,8 @@
   }
 
   // controls
-  // let the mouse pluck a stuck/wrapping insect off the web (it then falls away)
-  canvas.addEventListener("mousedown", function (e) {
-    if (!sim) return;
-    var rect = canvas.getBoundingClientRect(), mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  // grab a stuck/wrapping insect near (mx,my) to pluck it off the web; returns true if one was taken
+  function tryPluck(mx, my) {
     var best = null, bd = 26 * 26;
     for (var i = 0; i < bugs.length; i++) {
       var b = bugs[i];
@@ -1052,11 +1071,48 @@
       var dx = b.x - mx, dy = b.y - my, d = dx * dx + dy * dy;
       if (d < bd) { bd = d; best = b; }
     }
-    if (best) { heldBug = best; best.state = "held"; best.anchor = null; sim.draggedEntity = null; }
-  });
-  canvas.addEventListener("mouseup", function () {
+    if (best) { heldBug = best; best.state = "held"; best.anchor = null; sim.draggedEntity = null; return true; }
+    return false;
+  }
+  // let go of a plucked insect (it falls away)
+  function releaseHeld() {
     if (heldBug) { heldBug.state = "dropping"; heldBug.vy = 0; heldBug.fvx = (Math.random() - 0.5) * 1; heldBug = null; }
+  }
+
+  // --- mouse: pluck an insect, otherwise let verlet-js core start a web/spider drag ---
+  canvas.addEventListener("mousedown", function (e) {
+    if (!sim) return;
+    var rect = canvas.getBoundingClientRect();
+    tryPluck(e.clientX - rect.left, e.clientY - rect.top);
   });
+  canvas.addEventListener("mouseup", releaseHeld);
+
+  // --- touch: mirror the mouse path (verlet-js core is mouse-only), so drag / pluck work on
+  // phones. Feed sim.mouse + draggedEntity directly; preventDefault stops the page scrolling. ---
+  function touchPos(t) { var r = canvas.getBoundingClientRect(); return { x: t.clientX - r.left, y: t.clientY - r.top }; }
+  canvas.addEventListener("touchstart", function (e) {
+    if (!sim || !e.touches.length) return;
+    e.preventDefault();
+    var p = touchPos(e.touches[0]);
+    sim.mouse.x = p.x; sim.mouse.y = p.y;          // seed the position BEFORE nearestEntity()
+    if (tryPluck(p.x, p.y)) return;                // grabbed a bug -> no web drag
+    sim.mouseDown = true;
+    var nearest = sim.nearestEntity();
+    if (nearest) sim.draggedEntity = nearest;      // start dragging a thread / the spider
+  }, { passive: false });
+  canvas.addEventListener("touchmove", function (e) {
+    if (!sim || !e.touches.length) return;
+    e.preventDefault();
+    var p = touchPos(e.touches[0]);
+    sim.mouse.x = p.x; sim.mouse.y = p.y;          // verlet frame() drags draggedEntity to here
+  }, { passive: false });
+  function touchEnd(e) {
+    if (e) e.preventDefault();
+    releaseHeld();
+    if (sim) { sim.mouseDown = false; sim.draggedEntity = null; }
+  }
+  canvas.addEventListener("touchend", touchEnd, { passive: false });
+  canvas.addEventListener("touchcancel", touchEnd, { passive: false });
 
   document.getElementById("addBug").addEventListener("click", function () { spawnBug(); });
   document.getElementById("regen").addEventListener("click", build);
@@ -1064,10 +1120,21 @@
     spiderOn = !spiderOn; build();
   });
   window.addEventListener("keydown", function (e) { if (e.key === "r" || e.key === "R") build(); });
-  var resizeTimer;
+  var resizeTimer, lastW = window.innerWidth, lastH = window.innerHeight;
   window.addEventListener("resize", function () {
+    var w = window.innerWidth, h = window.innerHeight;
+    // mobile browsers fire resize when the URL bar shows/hides on scroll -- height changes,
+    // width doesn't. Ignore those (a full rebuild would clear all insects); only rebuild on a
+    // width change or a large height change (a real window resize / device rotation).
+    if (w === lastW && Math.abs(h - lastH) < 120) return;
+    lastW = w; lastH = h;
     clearTimeout(resizeTimer); resizeTimer = setTimeout(build, 200);
   });
+
+  // register the offline service worker (best-effort; failure is non-fatal)
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });
+  }
 
   build();
   loop();
