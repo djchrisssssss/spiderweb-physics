@@ -275,15 +275,20 @@
       };
       ctx.save();
       ctx.globalAlpha = 0.5;   // render the whole web at 50% opacity
-      var cons = composite.constraints, i;
-      for (i in cons) {
-        var c = cons[i];
-        if (!(c instanceof DistanceConstraint)) continue;
-        var st = styles[c.kind] || styles.bar;
-        ctx.beginPath();
-        ctx.moveTo(c.a.pos.x, c.a.pos.y);
-        ctx.lineTo(c.b.pos.x, c.b.pos.y);
-        ctx.strokeStyle = st.s; ctx.lineWidth = st.w; ctx.stroke();
+      // batch by kind: one beginPath + one stroke per silk type (~840 segments -> 5 strokes),
+      // instead of a beginPath/stroke per segment. Cuts canvas state churn dramatically.
+      var cons = composite.constraints, ncons = cons.length, i;
+      for (var key in styles) {
+        var st = styles[key], started = false;
+        for (i = 0; i < ncons; i++) {
+          var c = cons[i];
+          if (!(c instanceof DistanceConstraint)) continue;
+          if ((c.kind || "bar") !== key) continue;
+          if (!started) { ctx.beginPath(); started = true; }
+          ctx.moveTo(c.a.pos.x, c.a.pos.y);
+          ctx.lineTo(c.b.pos.x, c.b.pos.y);
+        }
+        if (started) { ctx.strokeStyle = st.s; ctx.lineWidth = st.w; ctx.stroke(); }
       }
       // bright dot at the very centre of the hub (where the spider rests)
       if (composite.hub) {
@@ -376,7 +381,8 @@
   var CONFIG = {
     physics: {          // GLOBAL — affects the whole web + spider hang. Change with care.
       gravity: 0.025,   // web sag / spider hang
-      friction: 0.97    // global damping (web bounce, momentum)
+      friction: 0.97,   // global damping (web bounce, momentum)
+      iterations: 30    // constraint-solver relaxation passes per frame; lower = cheaper + softer
     },
     descend: {          // spider silk-drop entrance (~3.6s)
       payout: 2.88,     // silk pay-out rate = descent speed cap (main knob)
@@ -424,7 +430,7 @@
     var W = window.innerWidth, H = window.innerHeight;
     // proportional to the web radius (min(W,H)*0.30); 1.0 on desktops, ~0.49 on a phone
     uiScale = Math.max(0.4, Math.min(1, Math.min(W, H) / 800));
-    var dpr = window.devicePixelRatio || 1;
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);   // cap at 2: 3x phones don't need 3x fill for thin silk
     canvas.style.width = W + "px";
     canvas.style.height = H + "px";
     canvas.width = W * dpr;
@@ -744,11 +750,56 @@
     return !!(de && sp && sp.particles.indexOf(de) >= 0);
   }
 
+  // --- spatial grid over the web particles, rebuilt once per frame (they move every tick).
+  // The spider queries nearestWebTo() ~8-12x per frame; the grid turns each query from a
+  // linear scan of ~450 particles into a scan of just the cells near the query point. ---
+  var webGrid = { cell: 50, cols: 0, rows: 0, minX: 0, minY: 0, buckets: null };
+  function rebuildWebGrid() {
+    if (!sim || !sim.composites[0]) { webGrid.buckets = null; return; }
+    var ps = sim.composites[0].particles, n = ps.length, cell = webGrid.cell;
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, i, p;
+    for (i = 0; i < n; i++) {
+      p = ps[i].pos;
+      if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+    }
+    var cols = Math.max(1, Math.ceil((maxX - minX) / cell) + 1);
+    var rows = Math.max(1, Math.ceil((maxY - minY) / cell) + 1);
+    var buckets = new Array(cols * rows);
+    for (i = 0; i < n; i++) {
+      p = ps[i].pos;
+      var idx = (((p.y - minY) / cell) | 0) * cols + (((p.x - minX) / cell) | 0);
+      (buckets[idx] || (buckets[idx] = [])).push(ps[i]);
+    }
+    webGrid.cols = cols; webGrid.rows = rows; webGrid.minX = minX; webGrid.minY = minY; webGrid.buckets = buckets;
+  }
+
+  // nearest web particle within maxR of (x,y). Scans the k-cell neighbourhood that fully
+  // covers the maxR disk, so it returns exactly what a linear scan would. Falls back to a
+  // linear scan if the grid isn't built yet (e.g. first frame / off-loop test pumps).
   function nearestWebTo(x, y, maxR) {
-    var ps = sim.composites[0].particles, best = null, bd = maxR * maxR;
-    for (var i = 0; i < ps.length; i++) {
-      var dx = ps[i].pos.x - x, dy = ps[i].pos.y - y, d2 = dx * dx + dy * dy;
-      if (d2 < bd) { bd = d2; best = ps[i]; }
+    var g = webGrid, buckets = g.buckets, best = null, bd = maxR * maxR, i, dx, dy, d2;
+    if (!buckets) {
+      var ps = sim.composites[0].particles;
+      for (i = 0; i < ps.length; i++) {
+        dx = ps[i].pos.x - x; dy = ps[i].pos.y - y; d2 = dx * dx + dy * dy;
+        if (d2 < bd) { bd = d2; best = ps[i]; }
+      }
+      return best;
+    }
+    var cell = g.cell, k = Math.ceil(maxR / cell);
+    var cx = ((x - g.minX) / cell) | 0, cy = ((y - g.minY) / cell) | 0;
+    var x0 = Math.max(0, cx - k), x1 = Math.min(g.cols - 1, cx + k);
+    var y0 = Math.max(0, cy - k), y1 = Math.min(g.rows - 1, cy + k);
+    for (var gy = y0; gy <= y1; gy++) {
+      for (var gx = x0; gx <= x1; gx++) {
+        var b = buckets[gy * g.cols + gx];
+        if (!b) continue;
+        for (i = 0; i < b.length; i++) {
+          dx = b[i].pos.x - x; dy = b[i].pos.y - y; d2 = dx * dx + dy * dy;
+          if (d2 < bd) { bd = d2; best = b[i]; }
+        }
+      }
     }
     return best;
   }
@@ -967,9 +1018,10 @@
   }
 
   function loop() {
+    rebuildWebGrid();// index web-particle positions for this frame (spider queries it below)
     updateBugs();    // insects fly in / struggle (struggle perturbs the web)
     updateSpider();  // hunting AI: return to centre, wait, approach newest prey (directed leg-crawl)
-    sim.frame(30);   // physics first
+    sim.frame(CONFIG.physics.iterations);   // physics first
     updateDrag();    // then the silk constraint / phase logic (final positional step)
     sim.draw();
     drawDrag();      // dragline drawn on top of the web

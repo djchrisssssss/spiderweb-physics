@@ -550,52 +550,56 @@ Composite.prototype.pin = function(index, pos) {
 }
 
 VerletJS.prototype.frame = function(step) {
+	// indexed loops throughout: this is the hot path (relax runs step * constraints per frame),
+	// and for..in over arrays deoptimizes in V8 (string keys). Behaviour is identical.
 	var i, j, c;
+	var composites = this.composites, nc = composites.length;
 
-	for (c in this.composites) {
-		for (i in this.composites[c].particles) {
-			var particles = this.composites[c].particles;
-			
+	for (c=0;c<nc;++c) {
+		var particles = composites[c].particles, np = particles.length;
+		for (i=0;i<np;++i) {
+			var p = particles[i];
+
 			// calculate velocity
-			var velocity = particles[i].pos.sub(particles[i].lastPos).scale(this.friction);
-		
+			var velocity = p.pos.sub(p.lastPos).scale(this.friction);
+
 			// ground friction
-			if (particles[i].pos.y >= this.height-1 && velocity.length2() > 0.000001) {
+			if (p.pos.y >= this.height-1 && velocity.length2() > 0.000001) {
 				var m = velocity.length();
 				velocity.x /= m;
 				velocity.y /= m;
 				velocity.mutableScale(m*this.groundFriction);
 			}
-		
+
 			// save last good state
-			particles[i].lastPos.mutableSet(particles[i].pos);
-		
+			p.lastPos.mutableSet(p.pos);
+
 			// gravity
-			particles[i].pos.mutableAdd(this.gravity);
-		
-			// inertia  
-			particles[i].pos.mutableAdd(velocity);
+			p.pos.mutableAdd(this.gravity);
+
+			// inertia
+			p.pos.mutableAdd(velocity);
 		}
 	}
-	
+
 	// handle dragging of entities
 	if (this.draggedEntity)
 		this.draggedEntity.pos.mutableSet(this.mouse);
-		
+
 	// relax
 	var stepCoef = 1/step;
-	for (c in this.composites) {
-		var constraints = this.composites[c].constraints;
+	for (c=0;c<nc;++c) {
+		var constraints = composites[c].constraints, ncons = constraints.length;
 		for (i=0;i<step;++i)
-			for (j in constraints)
+			for (j=0;j<ncons;++j)
 				constraints[j].relax(stepCoef);
 	}
-	
+
 	// bounds checking
-	for (c in this.composites) {
-		var particles = this.composites[c].particles;
-		for (i in particles)
-			this.bounds(particles[i]);
+	for (c=0;c<nc;++c) {
+		var bparticles = composites[c].particles, nbp = bparticles.length;
+		for (i=0;i<nbp;++i)
+			this.bounds(bparticles[i]);
 	}
 }
 
@@ -604,22 +608,23 @@ VerletJS.prototype.draw = function() {
 	
 	this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);  
 	
-	for (c in this.composites) {
+	var composites = this.composites, nc = composites.length;
+	for (c=0;c<nc;++c) {
 		// draw constraints
-		if (this.composites[c].drawConstraints) {
-			this.composites[c].drawConstraints(this.ctx, this.composites[c]);
+		if (composites[c].drawConstraints) {
+			composites[c].drawConstraints(this.ctx, composites[c]);
 		} else {
-			var constraints = this.composites[c].constraints;
-			for (i in constraints)
+			var constraints = composites[c].constraints;
+			for (i=0;i<constraints.length;++i)
 				constraints[i].draw(this.ctx);
 		}
-		
+
 		// draw particles
-		if (this.composites[c].drawParticles) {
-			this.composites[c].drawParticles(this.ctx, this.composites[c]);
+		if (composites[c].drawParticles) {
+			composites[c].drawParticles(this.ctx, composites[c]);
 		} else {
-			var particles = this.composites[c].particles;
-			for (i in particles)
+			var particles = composites[c].particles;
+			for (i=0;i<particles.length;++i)
 				particles[i].draw(this.ctx);
 		}
 	}
@@ -641,22 +646,24 @@ VerletJS.prototype.nearestEntity = function() {
 	var constraintsNearest = null;
 	
 	// find nearest point
-	for (c in this.composites) {
-		var particles = this.composites[c].particles;
-		for (i in particles) {
+	var composites = this.composites, nc = composites.length;
+	for (c=0;c<nc;++c) {
+		var particles = composites[c].particles, np = particles.length;
+		for (i=0;i<np;++i) {
 			var d2 = particles[i].pos.dist2(this.mouse);
 			if (d2 <= this.selectionRadius*this.selectionRadius && (entity == null || d2 < d2Nearest)) {
 				entity = particles[i];
-				constraintsNearest = this.composites[c].constraints;
+				constraintsNearest = composites[c].constraints;
 				d2Nearest = d2;
 			}
 		}
 	}
-	
+
 	// search for pinned constraints for this entity
-	for (i in constraintsNearest)
-		if (constraintsNearest[i] instanceof PinConstraint && constraintsNearest[i].a == entity)
-			entity = constraintsNearest[i];
+	if (constraintsNearest)
+		for (i=0;i<constraintsNearest.length;++i)
+			if (constraintsNearest[i] instanceof PinConstraint && constraintsNearest[i].a == entity)
+				entity = constraintsNearest[i];
 	
 	return entity;
 }
