@@ -29,6 +29,15 @@
     padding: 7px 12px; cursor: pointer; backdrop-filter: blur(4px);
   }
   #controls button:hover { background: rgba(58,60,72,.95); color: #fff; }
+  /* narrow screens: buttons on the top row (fixed height), the HUD text flows below them
+     so the two never overlap; slightly smaller type + tighter padding */
+  @media (max-width: 640px) {
+    #controls { top: 12px; right: 12px; gap: 6px; }
+    #controls button { font-size: 11px; padding: 6px 9px; }
+    #hud { top: 52px; left: 14px; right: 14px; }
+    #hud h1 { font-size: 14px; }
+    #hud p { font-size: 11px; }
+  }
 </style>
 </head>
 <body>
@@ -436,9 +445,13 @@
   var canvas = document.getElementById("stage");
   var sim, spiderOn = true;
   var drag = null;   // the spider's descent silk (dragline)
+  var uiScale = 1;   // responsive size factor: shrinks the spider + prey on small viewports
+                     // (the web already scales with min(W,H); this keeps them proportional)
 
   function build() {
     var W = window.innerWidth, H = window.innerHeight;
+    // proportional to the web radius (min(W,H)*0.30); 1.0 on desktops, ~0.49 on a phone
+    uiScale = Math.max(0.4, Math.min(1, Math.min(W, H) / 800));
     var dpr = window.devicePixelRatio || 1;
     canvas.style.width = W + "px";
     canvas.style.height = H + "px";
@@ -465,7 +478,7 @@
     heldBug = null;
     spiderState = "descend"; spiderTarget = null; stepClock = 0;
     if (spiderOn) {
-      var spider = sim.spider(new Vec2(W / 2 + (Math.random() - 0.5) * 220, -200), 0.75);  // spider size (0.5 -> 0.75, +50%)
+      var spider = sim.spider(new Vec2(W / 2 + (Math.random() - 0.5) * 220, -200), 0.75 * uiScale);  // base size 0.75, shrunk on small viewports
       styleSpider(spider);
       // hang head-down: point-reflect the spider 180 deg about its thorax so the abdomen
       // (where the silk attaches) is on top; the head + legs then hang below under gravity
@@ -573,7 +586,8 @@
     var ang = Math.random() * 6.283, rad = (0.15 + Math.random() * 0.85) * Math.min(W, H) * 0.3;
     var spec = BUG_SPEC[type];
     var size = 0.8 + Math.random() * 0.6;                 // size variation -> depth / spatial feel
-    var wrapSecs = CONFIG.wrap.baseSec + ((size - 0.8) / 0.6) * CONFIG.wrap.rangeSec;   // size-scaled wrap time
+    var wrapSecs = CONFIG.wrap.baseSec + ((size - 0.8) / 0.6) * CONFIG.wrap.rangeSec;   // size-scaled wrap time (from the unscaled size)
+    size *= uiScale;                                      // shrink the drawn prey on small viewports (visual only)
     bugs.push({
       type: type, x: x, y: y,
       tx: W / 2 + Math.cos(ang) * rad, ty: H / 2 + Math.sin(ang) * rad,
