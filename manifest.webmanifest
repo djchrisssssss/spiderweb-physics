@@ -1,0 +1,14 @@
+{
+  "name": "Spiderweb — generative web × verlet physics",
+  "short_name": "Spiderweb",
+  "description": "An interactive procedural spider web with a hunting black-widow: drag the silk, spawn insects, watch the spider hunt.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "icons": [
+    { "src": "./icon.svg", "type": "image/svg+xml", "sizes": "any", "purpose": "any" }
+  ]
+}
