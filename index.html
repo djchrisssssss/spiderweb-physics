@@ -962,7 +962,7 @@
       holdNear(t.cx, t.cy); stationary = true;
       t.held = true;
       var mpF = mouthPos(sp); t.x = mpF.x; t.y = mpF.y;   // held up to the mouth while feeding, not parked below
-      t.feed = Math.min(1, t.feed + 0.0035);
+      t.feed = Math.min(1, t.feed + 0.00175);   // feeding takes 2x as long (~9.5s)
       if (t.feed >= 1) { t.held = false; t.state = "dropping"; t.vy = 0; t.fvx = (Math.random() - 0.5) * 1; spiderTarget = null; spiderState = "waiting"; }
 
     } else {
