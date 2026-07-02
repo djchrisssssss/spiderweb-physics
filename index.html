@@ -10,6 +10,7 @@
     display: block;
     background: #000;
     cursor: grab;
+    touch-action: none;   /* let the canvas own touch gestures (drag/pluck), not the page */
   }
   #stage:active { cursor: grabbing; }
   #hud {
@@ -977,10 +978,8 @@
   }
 
   // controls
-  // let the mouse pluck a stuck/wrapping insect off the web (it then falls away)
-  canvas.addEventListener("mousedown", function (e) {
-    if (!sim) return;
-    var rect = canvas.getBoundingClientRect(), mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  // grab a stuck/wrapping insect near (mx,my) to pluck it off the web; returns true if one was taken
+  function tryPluck(mx, my) {
     var best = null, bd = 26 * 26;
     for (var i = 0; i < bugs.length; i++) {
       var b = bugs[i];
@@ -988,11 +987,48 @@
       var dx = b.x - mx, dy = b.y - my, d = dx * dx + dy * dy;
       if (d < bd) { bd = d; best = b; }
     }
-    if (best) { heldBug = best; best.state = "held"; best.anchor = null; sim.draggedEntity = null; }
-  });
-  canvas.addEventListener("mouseup", function () {
+    if (best) { heldBug = best; best.state = "held"; best.anchor = null; sim.draggedEntity = null; return true; }
+    return false;
+  }
+  // let go of a plucked insect (it falls away)
+  function releaseHeld() {
     if (heldBug) { heldBug.state = "dropping"; heldBug.vy = 0; heldBug.fvx = (Math.random() - 0.5) * 1; heldBug = null; }
+  }
+
+  // --- mouse: pluck an insect, otherwise let verlet-js core start a web/spider drag ---
+  canvas.addEventListener("mousedown", function (e) {
+    if (!sim) return;
+    var rect = canvas.getBoundingClientRect();
+    tryPluck(e.clientX - rect.left, e.clientY - rect.top);
   });
+  canvas.addEventListener("mouseup", releaseHeld);
+
+  // --- touch: mirror the mouse path (verlet-js core is mouse-only), so drag / pluck work on
+  // phones. Feed sim.mouse + draggedEntity directly; preventDefault stops the page scrolling. ---
+  function touchPos(t) { var r = canvas.getBoundingClientRect(); return { x: t.clientX - r.left, y: t.clientY - r.top }; }
+  canvas.addEventListener("touchstart", function (e) {
+    if (!sim || !e.touches.length) return;
+    e.preventDefault();
+    var p = touchPos(e.touches[0]);
+    sim.mouse.x = p.x; sim.mouse.y = p.y;          // seed the position BEFORE nearestEntity()
+    if (tryPluck(p.x, p.y)) return;                // grabbed a bug -> no web drag
+    sim.mouseDown = true;
+    var nearest = sim.nearestEntity();
+    if (nearest) sim.draggedEntity = nearest;      // start dragging a thread / the spider
+  }, { passive: false });
+  canvas.addEventListener("touchmove", function (e) {
+    if (!sim || !e.touches.length) return;
+    e.preventDefault();
+    var p = touchPos(e.touches[0]);
+    sim.mouse.x = p.x; sim.mouse.y = p.y;          // verlet frame() drags draggedEntity to here
+  }, { passive: false });
+  function touchEnd(e) {
+    if (e) e.preventDefault();
+    releaseHeld();
+    if (sim) { sim.mouseDown = false; sim.draggedEntity = null; }
+  }
+  canvas.addEventListener("touchend", touchEnd, { passive: false });
+  canvas.addEventListener("touchcancel", touchEnd, { passive: false });
 
   document.getElementById("addBug").addEventListener("click", function () { spawnBug(); });
   document.getElementById("regen").addEventListener("click", build);
