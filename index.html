@@ -386,6 +386,52 @@
     };
   }
 
+  /* ========================================================================
+   *  TUNING CONFIG — all runtime motion / timing knobs in one place.
+   *  Change values here only; the logic below reads from CONFIG. Each knob is
+   *  independent unless noted. (Web-structure constants in organicWeb() are a
+   *  one-time build, not motion, and are intentionally left out.)
+   * ====================================================================== */
+  var CONFIG = {
+    physics: {          // GLOBAL — affects the whole web + spider hang. Change with care.
+      gravity: 0.025,   // web sag / spider hang
+      friction: 0.97    // global damping (web bounce, momentum)
+    },
+    descend: {          // spider silk-drop entrance (~2.9s)
+      payout: 3.6,      // silk pay-out rate = descent speed cap (main knob)
+      pull: 0.11,       // extra downward force; keep >= payout*0.03 or descent goes gravity-limited (slower)
+      releaseMargin: 30,// stops descending this many px above the hub centre
+      silkFade: 0.012   // released dragline fade-out per frame (~1.3s)
+    },
+    flight: {           // prey arrival flight — per species: forward px/frame + wobble amplitude
+      fly:      { speed: 9.0, wobble: 3.4 },
+      moth:     { speed: 4.5, wobble: 1.3 },
+      mosquito: { speed: 3.6, wobble: 1.6 },
+      roach:    { speed: 6.9, wobble: 1.5 },
+      wobbleFreq: 0.3   // wobble oscillation frequency (shared)
+    },
+    stick:   { dist: 12, snagChance: 0.05 },   // when a flying prey sticks to the web
+    struggle:{ amp: 1.8, decay: 0.992 },       // stuck-prey web shake + how fast it fades
+    husk:    { fallGravity: 0.25, fade: 0.02 },// drained husk drop accel + fade-out (~0.8s)
+    crawl: {            // spider walking (tetrapodStep)
+      stride: 34,       // leg step-ahead distance = main crawl speed
+      swing: 9,         // frames between leg-set swaps (gait cadence)
+      assist: 0.35,     // per-frame body nudge toward goal
+      gripPlant: 0.75,  // stance-leg grip stiffness when planting ahead
+      gripRegrip: 0.6,  // stance-leg grip stiffness when re-gripping
+      offWebDrift: 1.5  // crawl-back speed when torn off the web
+    },
+    hold: 0.15,         // clutch force onto prey/cocoon while wrapping/feeding
+    groundGrip: 0.3,    // stiffness of support legs kept planted at rest
+    wrap: {             // cocoon wrapping
+      baseSec: 4,       // wrap time for the smallest prey
+      rangeSec: 4,      // extra seconds added for the largest prey (so 4..8s)
+      flingSpeed: 0.28, // hind-leg silk-fling phase speed
+      flingRadius: 16   // hind-leg orbit radius around the prey
+    },
+    feedRate: 0.00175   // feeding drain per frame -> feeding time = 1/rate/60 (~9.5s)
+  };
+
   /* ------------------------------ app / loop ------------------------------ */
   var canvas = document.getElementById("stage");
   var sim, spiderOn = true;
@@ -402,8 +448,8 @@
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);   // reset (don't compound on rebuild)
 
     sim = new VerletJS(W, H, canvas);
-    sim.gravity = new Vec2(0, 0.025);  // halved again -> another ~50% less sag, very taut web
-    sim.friction = 0.97;
+    sim.gravity = new Vec2(0, CONFIG.physics.gravity);
+    sim.friction = CONFIG.physics.friction;
     sim.selectionRadius = 24;
 
     var pointNum = 5 + Math.floor(Math.random() * 3);       // 5..7 anchors
@@ -436,7 +482,7 @@
       drag = {
         phase: "descend",
         anchor: { x: spider.abdomen.pos.x, y: spider.abdomen.pos.y },
-        length: 0, payout: 3.6,   // silk pay-out rate caps descent speed -> ~3s to reach the hub
+        length: 0, payout: CONFIG.descend.payout,
         mode: Math.random() < 0.5 ? "drift" : "fall",   // what the silk does after landing
         pts: null, life: 1, age: 0
       };
@@ -455,12 +501,12 @@
       drag.length += drag.payout;
       // web gravity is tiny (taut web), so add a uniform extra downward pull to the whole
       // spider for a paced fall. Uniform => no torque => the head-down orientation is preserved.
-      for (var pi = 0; pi < sp.particles.length; pi++) sp.particles[pi].lastPos.y -= 0.11;  // faster descent (~3s target)
+      for (var pi = 0; pi < sp.particles.length; pi++) sp.particles[pi].lastPos.y -= CONFIG.descend.pull;
       var ab = sp.abdomen, dx = ab.pos.x - drag.anchor.x, dy = ab.pos.y - drag.anchor.y;
       var d = Math.sqrt(dx * dx + dy * dy) || 1e-6;
       if (d > drag.length) { var f = (d - drag.length) / d; ab.pos.x -= dx * f; ab.pos.y -= dy * f; }  // silk can't over-stretch
       // reached the web centre -> release the silk
-      if (ab.pos.y >= sim.height * 0.5 - 30 || drag.age > 1600) {
+      if (ab.pos.y >= sim.height * 0.5 - CONFIG.descend.releaseMargin || drag.age > 1600) {
         var n = 16, a = drag.anchor, b = ab.pos;
         drag.pts = [];
         for (var k = 0; k <= n; k++) {
@@ -471,7 +517,7 @@
         spiderState = "toCenter";   // landed -> walk to the hub centre and wait for prey
       }
     } else if (drag.phase === "release") {
-      drag.life -= 0.012;                       // fade over ~80 frames
+      drag.life -= CONFIG.descend.silkFade;     // released dragline fade-out
       var pts = drag.pts, k;
       if (drag.mode === "drift") {              // gossamer floats up & sideways on the air
         for (k = 0; k < pts.length; k++) {
@@ -513,12 +559,7 @@
   var bugSeq = 0;
   var heldBug = null;   // an insect currently grabbed by the mouse
   var BUG_TYPES = ["fly", "moth", "mosquito", "roach"];
-  var BUG_SPEC = {
-    fly:      { speed: 9.0, wobble: 3.4 },    // flight speeds +50%
-    moth:     { speed: 4.5, wobble: 1.3 },
-    mosquito: { speed: 3.6, wobble: 1.6 },   // erratic, hovering flight -- ants can't fly at all
-    roach:    { speed: 6.9, wobble: 1.5 }
-  };
+  var BUG_SPEC = CONFIG.flight;   // per-species speed/wobble live in CONFIG.flight
 
   function spawnBug(type) {
     if (!sim) return;
@@ -532,7 +573,7 @@
     var ang = Math.random() * 6.283, rad = (0.15 + Math.random() * 0.85) * Math.min(W, H) * 0.3;
     var spec = BUG_SPEC[type];
     var size = 0.8 + Math.random() * 0.6;                 // size variation -> depth / spatial feel
-    var wrapSecs = 4 + ((size - 0.8) / 0.6) * 4;          // wrap time scales with prey size: 4s..8s
+    var wrapSecs = CONFIG.wrap.baseSec + ((size - 0.8) / 0.6) * CONFIG.wrap.rangeSec;   // size-scaled wrap time
     bugs.push({
       type: type, x: x, y: y,
       tx: W / 2 + Math.cos(ang) * rad, ty: H / 2 + Math.sin(ang) * rad,
@@ -561,31 +602,31 @@
       } else if (b.state === "arriving") {
         var dx = b.tx - b.x, dy = b.ty - b.y, d = Math.sqrt(dx * dx + dy * dy) || 1;
         b.ang = Math.atan2(dy, dx);
-        var nx = dx / d, ny = dy / d, perp = Math.sin(b.t * 0.3 + b.phase) * b.wobble;
+        var nx = dx / d, ny = dy / d, perp = Math.sin(b.t * CONFIG.flight.wobbleFreq + b.phase) * b.wobble;
         b.x += nx * b.speed - ny * perp + (Math.random() - 0.5) * b.wobble;
         b.y += ny * b.speed + nx * perp + (Math.random() - 0.5) * b.wobble;
         var nr = nearestWebParticle(b.x, b.y);
         // stick when it reaches its intended depth (inner OR outer); plus a small chance to
         // get snagged earlier by a thread it passes -> natural inner/outer spread
-        if (nr.p && (d < 12 || (nr.d2 < 12 * 12 && Math.random() < 0.05))) {
+        if (nr.p && (d < CONFIG.stick.dist || (nr.d2 < CONFIG.stick.dist * CONFIG.stick.dist && Math.random() < CONFIG.stick.snagChance))) {
           b.state = "stuck"; b.anchor = nr.p; b.struggle = 1;
         }
       } else if (b.state === "stuck" || b.state === "wrapping") {
         if (!b.anchor) { bugs.splice(i, 1); continue; }
         b.x = b.anchor.pos.x; b.y = b.anchor.pos.y;   // ride the web point
         if (b.struggle > 0.05) {                      // struggle shakes the web, decaying
-          var amp = b.struggle * 1.8;
+          var amp = b.struggle * CONFIG.struggle.amp;
           b.anchor.pos.x += (Math.random() - 0.5) * amp;
           b.anchor.pos.y += (Math.random() - 0.5) * amp;
-          b.struggle *= 0.992;
+          b.struggle *= CONFIG.struggle.decay;
         }
       } else if (b.state === "feeding") {
         // held in the spider's mouth: updateSpider positions it each frame (mouthPos).
         // left behind while the spider hunts fresh prey: park it at its centre spot.
         if (!b.held && b.cx != null) { b.x = b.cx; b.y = b.cy; }
       } else if (b.state === "dropping") {            // drained husk falls and fades
-        b.vy = (b.vy || 0) + 0.25; b.y += b.vy; b.x += (b.fvx || 0);
-        b.drop = (b.drop || 0) + 0.02;
+        b.vy = (b.vy || 0) + CONFIG.husk.fallGravity; b.y += b.vy; b.x += (b.fvx || 0);
+        b.drop = (b.drop || 0) + CONFIG.husk.fade;
         if (b.y > sim.height + 40 || b.drop >= 1) bugs.splice(i, 1);
       }
       // carried: position is set by the spider, nothing to do here
@@ -794,7 +835,7 @@
     for (var k = 0; k < 8; k++) { if (legGripped(sp, sp.legs[k])) cnt++; else need.push(k); }
     for (var i = 0; i < need.length && cnt < min; i++) {
       var leg = sp.legs[need[i]], best = nearestWebTo(leg.pos.x, leg.pos.y, reach);
-      if (best) { var g = new DistanceConstraint(leg, best, 0.3, 0); g.isGrip = true; sp.constraints.push(g); cnt++; }
+      if (best) { var g = new DistanceConstraint(leg, best, CONFIG.groundGrip, 0); g.isGrip = true; sp.constraints.push(g); cnt++; }
     }
   }
 
@@ -809,7 +850,7 @@
     }
     for (var i = 0; i < need.length && cnt < min; i++) {
       var leg = sp.legs[need[i]], best = nearestWebTo(leg.pos.x, leg.pos.y, reach);
-      if (best) { var g = new DistanceConstraint(leg, best, 0.3, 0); g.isGrip = true; sp.constraints.push(g); cnt++; }
+      if (best) { var g = new DistanceConstraint(leg, best, CONFIG.groundGrip, 0); g.isGrip = true; sp.constraints.push(g); cnt++; }
     }
   }
 
@@ -818,12 +859,12 @@
   var wrapPhase = 0;
   function updateWrapLegs(sc, cx, cy) {
     var sp = sim.composites[1], back = [6, 7];
-    wrapPhase += 0.28;
+    wrapPhase += CONFIG.wrap.flingSpeed;
     for (var i = 0; i < 2; i++) {
       var leg = sp.legs[back[i]];
       dropLegGrip(sp, leg);            // free the hind foot so it can sweep, not anchored to a thread
       var ang = wrapPhase + (i === 0 ? 0 : Math.PI);          // opposite sides -> criss-cross fling
-      var rad = (16 * sc) * (0.85 + 0.15 * Math.sin(wrapPhase * 2 + i * Math.PI));
+      var rad = (CONFIG.wrap.flingRadius * sc) * (0.85 + 0.15 * Math.sin(wrapPhase * 2 + i * Math.PI));
       var tx = cx + Math.cos(ang) * rad, ty = cy + Math.sin(ang) * rad;
       leg.pos.x += (tx - leg.pos.x) * 0.6;
       leg.pos.y += (ty - leg.pos.y) * 0.6;
@@ -841,7 +882,7 @@
   // gentle clutch toward a point (used while wrapping / feeding)
   function holdNear(x, y) {
     var th = sim.composites[1].particles[0].pos, dx = x - th.x, dy = y - th.y, d = Math.sqrt(dx * dx + dy * dy) || 1;
-    if (d > 4) { th.x += dx / d * 0.15; th.y += dy / d * 0.15; }
+    if (d > 4) { th.x += dx / d * CONFIG.hold; th.y += dy / d * CONFIG.hold; }
   }
 
   // detach feet that the drag has stretched far -> the spider can be pulled off the web
@@ -863,7 +904,7 @@
   function tetrapodStep(tx, ty) {
     var sp = sim.composites[1], thorax = sp.particles[0].pos, sc = sp.scale || 1;
     var dx = tx - thorax.x, dy = ty - thorax.y, d = Math.sqrt(dx * dx + dy * dy) || 1, ux = dx / d, uy = dy / d;
-    var reach = 120 * sc, stride = 34 * sc, SWING = 9, a, leg, best;
+    var reach = 120 * sc, stride = CONFIG.crawl.stride * sc, SWING = CONFIG.crawl.swing, a, leg, best;
     gaitClock++;
     if (gaitClock % SWING === 0) {                    // swap stance/swing
       stanceSet ^= 1;
@@ -871,16 +912,16 @@
       for (a = 0; a < 4; a++) {                        // new stance legs plant AHEAD -> pull the body forward
         leg = sp.legs[nStance[a]]; dropLegGrip(sp, leg);
         best = nearestWebTo(leg.pos.x + ux * stride, leg.pos.y + uy * stride, reach);
-        if (best) { var g = new DistanceConstraint(leg, best, 0.75, 0); g.isGrip = true; sp.constraints.push(g); }
+        if (best) { var g = new DistanceConstraint(leg, best, CONFIG.crawl.gripPlant, 0); g.isGrip = true; sp.constraints.push(g); }
       }
       for (a = 0; a < 4; a++) dropLegGrip(sp, sp.legs[nSwing[a]]);   // new swing legs lift off
     }
     var stance = GAIT_SETS[stanceSet];                // keep the stance set planted if any slipped
     for (a = 0; a < 4; a++) {
       leg = sp.legs[stance[a]];
-      if (!legGripped(sp, leg)) { best = nearestWebTo(leg.pos.x, leg.pos.y, reach); if (best) { var g2 = new DistanceConstraint(leg, best, 0.6, 0); g2.isGrip = true; sp.constraints.push(g2); } }
+      if (!legGripped(sp, leg)) { best = nearestWebTo(leg.pos.x, leg.pos.y, reach); if (best) { var g2 = new DistanceConstraint(leg, best, CONFIG.crawl.gripRegrip, 0); g2.isGrip = true; sp.constraints.push(g2); } }
     }
-    thorax.x += ux * 0.35; thorax.y += uy * 0.35;     // small assist for smooth progress
+    thorax.x += ux * CONFIG.crawl.assist; thorax.y += uy * CONFIG.crawl.assist;   // body assist
   }
 
   function updateSpider() {
@@ -902,7 +943,7 @@
     // torn off the web: drift back toward the hub every frame until the feet can re-grip
     if (!hasGrip(sp)) {
       var rdx = hub.x - thorax.x, rdy = hub.y - thorax.y, rd = Math.sqrt(rdx * rdx + rdy * rdy) || 1;
-      thorax.x += rdx / rd * 1.5; thorax.y += rdy / rd * 1.5;
+      thorax.x += rdx / rd * CONFIG.crawl.offWebDrift; thorax.y += rdy / rd * CONFIG.crawl.offWebDrift;
     }
 
     var t, stationary = false;
@@ -962,7 +1003,7 @@
       holdNear(t.cx, t.cy); stationary = true;
       t.held = true;
       var mpF = mouthPos(sp); t.x = mpF.x; t.y = mpF.y;   // held up to the mouth while feeding, not parked below
-      t.feed = Math.min(1, t.feed + 0.00175);   // feeding takes 2x as long (~9.5s)
+      t.feed = Math.min(1, t.feed + CONFIG.feedRate);
       if (t.feed >= 1) { t.held = false; t.state = "dropping"; t.vy = 0; t.fvx = (Math.random() - 0.5) * 1; spiderTarget = null; spiderState = "waiting"; }
 
     } else {
