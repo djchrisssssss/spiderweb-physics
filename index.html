@@ -257,35 +257,6 @@
     return composite;
   };
 
-  function shuffle(o) { for (var j, x, i = o.length; i; j = Math.floor(Math.random() * i), x = o[--i], o[i] = o[j], o[j] = x); return o; }
-
-  VerletJS.prototype.crawl = function(leg) {
-    var web = this.composites[0], spider = this.composites[1];
-    if (!spider) return;
-    var sc = spider.scale || 1;
-    var stepRadius = 110 * sc, minStepRadius = 40 * sc;
-    var theta = spider.particles[0].pos.angle2(spider.particles[0].pos.add(new Vec2(1, 0)), spider.particles[1].pos);
-    var b1 = new Vec2(Math.cos(theta), Math.sin(theta));
-    var b2 = new Vec2(Math.cos(theta + Math.PI / 2), Math.sin(theta + Math.PI / 2));
-    var flag1 = leg < 4 ? 1 : -1, flag2 = leg % 2 == 0 ? 1 : 0;
-    var paths = [], i;
-    for (i in web.particles) {
-      if (web.particles[i].pos.sub(spider.particles[0].pos).dot(b1) * flag1 >= 0
-        && web.particles[i].pos.sub(spider.particles[0].pos).dot(b2) * flag2 >= 0) {
-        var d2 = web.particles[i].pos.dist2(spider.particles[0].pos);
-        if (!(d2 >= minStepRadius * minStepRadius && d2 <= stepRadius * stepRadius)) continue;
-        var taken = false, j;
-        for (j in spider.constraints) for (var k = 0; k < 8; ++k)
-          if (spider.constraints[j] instanceof DistanceConstraint && spider.constraints[j].a == spider.legs[k] && spider.constraints[j].b == web.particles[i]) taken = true;
-        if (!taken) paths.push(web.particles[i]);
-      }
-    }
-    for (i in spider.constraints)
-      if (spider.constraints[i] instanceof DistanceConstraint && spider.constraints[i].a == spider.legs[leg]) { spider.constraints.splice(i, 1); break; }
-    // grip the web gently (stiffness 0.25) so the spider disturbs/shakes the web ~75% less
-    if (paths.length > 0) { shuffle(paths); spider.constraints.push(new DistanceConstraint(spider.legs[leg], paths[0], 0.25, 0)); }
-  };
-
   /* ------------------------------ draw styling ------------------------------ */
   function styleWeb(web) {
     web.drawParticles = function() {};   // silk only, no node dots
@@ -476,7 +447,7 @@
     drag = null;
     bugs = [];
     heldBug = null;
-    spiderState = "descend"; spiderTarget = null; stepClock = 0;
+    spiderState = "descend"; spiderTarget = null;
     if (spiderOn) {
       var spider = sim.spider(new Vec2(W / 2 + (Math.random() - 0.5) * 220, -200), 0.75 * uiScale);  // base size 0.75, shrunk on small viewports
       styleSpider(spider);
@@ -749,7 +720,6 @@
   /* ---------------- spider hunting AI (Phase 2: return to centre, wait, approach) ---------- */
   var spiderState = "descend";   // descend -> toCenter -> waiting -> approaching -> atPrey
   var spiderTarget = null;
-  var stepClock = 0;
 
   // newest catchable prey: stuck, or a partially-wrapped one that was abandoned mid-wrap
   function bestPrey() {
@@ -798,39 +768,6 @@
       var c = sp.constraints[j];
       if (c.isGrip && c.a.pos.sub(c.b.pos).length() > max) sp.constraints.splice(j, 1);
     }
-  }
-
-  // directed leg-crawl: plant the next leg on a web point toward the goal; the grip pulls
-  // the body along (this is what moves the spider). A small assist smooths progress.
-  function legStepToward(tx, ty) {
-    var sp = sim.composites[1], web = sim.composites[0], thorax = sp.particles[0].pos;
-    var gdx = tx - thorax.x, gdy = ty - thorax.y, gd = Math.sqrt(gdx * gdx + gdy * gdy) || 1;
-    var gx = gdx / gd, gy = gdy / gd, sc = sp.scale || 1;
-    var reach = 130 * sc, minStep = 28 * sc, best = null, bestScore = -1e9, ps = web.particles;
-    for (var i = 0; i < ps.length; i++) {
-      var dx = ps[i].pos.x - thorax.x, dy = ps[i].pos.y - thorax.y, d2 = dx * dx + dy * dy;
-      if (d2 < minStep * minStep || d2 > reach * reach) continue;
-      var d = Math.sqrt(d2), dot = (dx * gx + dy * gy) / d;
-      if (dot < 0.25) continue;
-      var score = dot + (d / reach) * 0.4;
-      if (score > bestScore) { bestScore = score; best = ps[i]; }
-    }
-    if (best) {
-      var leg = sp.legs[(legIndex++) % 8];
-      dropLegGrip(sp, leg);
-      var g = new DistanceConstraint(leg, best, 0.55, 0); g.isGrip = true; sp.constraints.push(g);
-      thorax.x += gx * 0.2; thorax.y += gy * 0.2;
-    } else {
-      thorax.x += gx * 2; thorax.y += gy * 2;   // off the web -> travel back faster to re-grip
-    }
-  }
-
-  // settle: plant the next leg on the nearest web point under its foot (gathers the legs
-  // around the body so the stance looks natural while wrapping / feeding)
-  function settleStep() {
-    var sp = sim.composites[1], sc = sp.scale || 1, leg = sp.legs[(legIndex++) % 8];
-    var best = nearestWebTo(leg.pos.x, leg.pos.y, 120 * sc);
-    if (best) { dropLegGrip(sp, leg); var g = new DistanceConstraint(leg, best, 0.5, 0); g.isGrip = true; sp.constraints.push(g); }
   }
 
   function legGripped(sp, leg) {
@@ -1028,7 +965,6 @@
     if (stationary) groundLegs(8);        // at rest: settle all 8 feet down naturally
   }
 
-  var legIndex = 0;
   function loop() {
     updateBugs();    // insects fly in / struggle (struggle perturbs the web)
     updateSpider();  // hunting AI: return to centre, wait, approach newest prey (directed leg-crawl)
