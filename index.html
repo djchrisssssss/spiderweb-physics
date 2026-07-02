@@ -419,6 +419,13 @@
     feedRate: 0.00175   // feeding drain per frame -> feeding time = 1/rate/60 (~9.5s)
   };
 
+  // respect the OS "reduce motion" setting: strongly damp the most involuntary movement --
+  // prey struggling shakes the whole web for seconds -- and calm the insect flight wobble
+  if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    CONFIG.struggle.amp *= 0.25;
+    CONFIG.flight.wobbleFreq *= 0.5;
+  }
+
   /* ------------------------------ app / loop ------------------------------ */
   var canvas = document.getElementById("stage");
   var sim, spiderOn = true;
@@ -443,11 +450,16 @@
     sim.friction = CONFIG.physics.friction;
     sim.selectionRadius = 24;
 
-    var pointNum = 5 + Math.floor(Math.random() * 3);       // 5..7 anchors
-    var raysPer = 5 + Math.floor(Math.random() * 3);        // 5..7 rays per segment (~2x density)
+    // small screens get a sparser web: fewer rays/rings -> ~half the particles, which both
+    // fixes the cramped look on a phone and roughly halves the physics cost there
+    var small = Math.min(W, H) < 640;
+    var pointNum = 5 + Math.floor(Math.random() * 3);                      // 5..7 anchors
+    var raysPer = small ? 3 + Math.floor(Math.random() * 2)                // phone: 3..4 rays/segment
+                        : 5 + Math.floor(Math.random() * 3);               // desktop: 5..7
+    var levels = small ? 10 : 13;                                          // rings per ray
     var radiusBase = Math.min(W, H) * 0.30;
     var web = sim.organicWeb(new Vec2(W / 2, H / 2), {
-      pointNum: pointNum, raysPerSegment: raysPer, levels: 13, radiusBase: radiusBase
+      pointNum: pointNum, raysPerSegment: raysPer, levels: levels, radiusBase: radiusBase
     });
     styleWeb(web);
 
@@ -1088,8 +1100,14 @@
     spiderOn = !spiderOn; build();
   });
   window.addEventListener("keydown", function (e) { if (e.key === "r" || e.key === "R") build(); });
-  var resizeTimer;
+  var resizeTimer, lastW = window.innerWidth, lastH = window.innerHeight;
   window.addEventListener("resize", function () {
+    var w = window.innerWidth, h = window.innerHeight;
+    // mobile browsers fire resize when the URL bar shows/hides on scroll -- height changes,
+    // width doesn't. Ignore those (a full rebuild would clear all insects); only rebuild on a
+    // width change or a large height change (a real window resize / device rotation).
+    if (w === lastW && Math.abs(h - lastH) < 120) return;
+    lastW = w; lastH = h;
     clearTimeout(resizeTimer); resizeTimer = setTimeout(build, 200);
   });
 
